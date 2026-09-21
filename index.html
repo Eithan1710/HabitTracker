@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>הרגלים</title>
+<meta name="theme-color" content="#F3F4F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0A0C11" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="הרגלים">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="style.css">
+<!-- Font loads without blocking the first paint; system font is the fallback -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700&display=swap" media="print" onload="this.media='all'">
+</head>
+<body>
+
+<main class="app">
+  <section id="view-today" class="view" aria-live="polite"></section>
+  <section id="view-history" class="view" hidden></section>
+  <section id="view-settings" class="view" hidden></section>
+</main>
+
+<nav class="nav" aria-label="ניווט ראשי">
+  <button type="button" id="nav-today" aria-current="page">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></svg>
+    <span>היום</span>
+  </button>
+  <button type="button" id="nav-history" aria-current="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20v-9M12 20V4M19 20v-6"/></svg>
+    <span>היסטוריה</span>
+  </button>
+  <button type="button" id="nav-settings" aria-current="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M18 7h2M4 17h2M11 17h9"/><circle cx="15.5" cy="7" r="2.2"/><circle cx="8.5" cy="17" r="2.2"/></svg>
+    <span>הגדרות</span>
+  </button>
+</nav>
+
+<!-- Day details (History) -->
+<div id="sheet" class="sheet-wrap" hidden>
+  <div class="sheet-back" data-close></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <button type="button" class="grab" data-close aria-label="סגירה"></button>
+    <div id="sheetBody"></div>
+  </div>
+</div>
+
+<!-- Sign in (shown only when Supabase is configured and there is no session) -->
+<div id="login" class="login" hidden role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+  <form id="loginForm" class="login-card">
+    <h1 id="loginTitle">התחברות</h1>
+    <p class="muted">פעם אחת בלבד. אחר כך האתר זוכר אותך.</p>
+    <label>אימייל
+      <input id="lgEmail" type="email" name="email" autocomplete="username" inputmode="email" autocapitalize="none" required>
+    </label>
+    <label>סיסמה
+      <input id="lgPass" type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <p class="err" id="lgErr" role="alert"></p>
+    <button class="btn" id="lgBtn" type="submit">כניסה</button>
+  </form>
+</div>
+
+<script src="config.js"></script>
+<script src="habits.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
