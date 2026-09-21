@@ -1,7 +1,11 @@
 -- =====================================================================
--- Habit tracker: Supabase schema
+-- Habit tracker: Supabase schema (single user, no login)
 -- Run once: Supabase Dashboard -> SQL Editor -> New query -> paste -> Run
 -- Safe to run again (idempotent). Nothing here deletes data.
+--
+-- If you already ran an earlier version of this script (the one with
+-- user_id / login) and have no real data yet, run this first:
+--   drop table if exists public.completions;
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -36,23 +40,22 @@ insert into public.habits (id, title, kind, hint, weekdays, time_labels, sort_or
 on conflict (id) do nothing;
 
 -- ---------------------------------------------------------------------
--- 2) completions: one row per user + habit + day.
+-- 2) completions: one row per habit + day.
 --    The primary key is the duplicate guard: the same habit can never
---    appear twice for the same user on the same date.
+--    appear twice on the same date.
 -- ---------------------------------------------------------------------
 create table if not exists public.completions (
-  user_id      uuid        not null default auth.uid() references auth.users (id) on delete cascade,
   habit_id     text        not null references public.habits (id) on update cascade on delete restrict,
-  date         date        not null,                     -- the user's local calendar day
+  date         date        not null,                     -- local calendar day
   completed    boolean     not null default true,
   completed_at timestamptz,
   updated_at   timestamptz not null default now(),
-  primary key (user_id, habit_id, date),
+  primary key (habit_id, date),
   constraint completions_date_sane check (date between date '2020-01-01' and date '2100-01-01')
 );
 
--- History screens read by date range for one user.
-create index if not exists completions_user_date_idx on public.completions (user_id, date desc);
+-- History screens read by date range.
+create index if not exists completions_date_idx on public.completions (date desc);
 
 -- ---------------------------------------------------------------------
 -- 3) Trigger: keeps updated_at / completed_at correct on every write.
@@ -83,40 +86,46 @@ create trigger completions_touch
   for each row execute function public.completions_touch();
 
 -- ---------------------------------------------------------------------
--- 4) Row Level Security: every user can only ever see and change their own rows.
+-- 4) Row Level Security, no login.
+--    The site uses the public "anon" key, so the anon role may read habits,
+--    and read / add / update completions. It can NOT delete anything
+--    (unticking is stored as completed = false) and can not touch the
+--    habits table.
+--    Trade-off: anyone who has your site address can also read and edit
+--    these rows. Keep the address to yourself.
 -- ---------------------------------------------------------------------
 alter table public.habits      enable row level security;
 alter table public.completions enable row level security;
 
-revoke all on public.habits      from anon;
-revoke all on public.completions from anon;
-grant select                         on public.habits      to authenticated;
-grant select, insert, update, delete on public.completions to authenticated;
+revoke all on public.habits      from anon, authenticated;
+revoke all on public.completions from anon, authenticated;
+grant select                 on public.habits      to anon;
+grant select, insert, update on public.completions to anon;
 
 drop policy if exists habits_read on public.habits;
 create policy habits_read on public.habits
-  for select to authenticated using (true);
+  for select to anon using (true);
 
+drop policy if exists completions_read on public.completions;
+create policy completions_read on public.completions
+  for select to anon using (true);
+
+drop policy if exists completions_insert on public.completions;
+create policy completions_insert on public.completions
+  for insert to anon with check (true);
+
+drop policy if exists completions_update on public.completions;
+create policy completions_update on public.completions
+  for update to anon using (true) with check (true);
+
+-- Drop the old per-user policies if an earlier version was run.
 drop policy if exists completions_select_own on public.completions;
-create policy completions_select_own on public.completions
-  for select to authenticated using (user_id = (select auth.uid()));
-
 drop policy if exists completions_insert_own on public.completions;
-create policy completions_insert_own on public.completions
-  for insert to authenticated with check (user_id = (select auth.uid()));
-
 drop policy if exists completions_update_own on public.completions;
-create policy completions_update_own on public.completions
-  for update to authenticated
-  using (user_id = (select auth.uid()))
-  with check (user_id = (select auth.uid()));
-
 drop policy if exists completions_delete_own on public.completions;
-create policy completions_delete_own on public.completions
-  for delete to authenticated using (user_id = (select auth.uid()));
 
 -- ---------------------------------------------------------------------
--- Optional sanity checks (run separately after signing in from the app):
+-- Optional sanity checks:
 --   select id, title, kind, weekdays from public.habits order by sort_order;
 --   select habit_id, count(*) from public.completions group by 1 order by 2 desc;
 -- ---------------------------------------------------------------------

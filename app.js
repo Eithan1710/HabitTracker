@@ -8,7 +8,7 @@
   var L = window.HabitLogic;
   var CFG = window.HABITS_CONFIG || {};
   var SDK_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js';
-  var KEY = { habits: 'hb:v1:habits', done: 'hb:v1:done', pending: 'hb:v1:pending', user: 'hb:v1:user', first: 'hb:v1:first' };
+  var KEY = { habits: 'hb:v1:habits', done: 'hb:v1:done', pending: 'hb:v1:pending', first: 'hb:v1:first' };
   var LETTER = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
   var CONFIGURED = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY);
 
@@ -35,11 +35,9 @@
     habits: (Array.isArray(cachedHabits) && cachedHabits.length ? cachedHabits : L.HABITS).map(L.normalizeHabit).sort(bySort),
     byDate: load(KEY.done, {}),
     pending: load(KEY.pending, {}),
-    user: load(KEY.user, null),
     first: load(KEY.first, null),
     firstChecked: false,
     sb: null,
-    needLogin: false,
     today: L.midnight(new Date()),
     viewDate: L.midnight(new Date()),
     tab: 'today',
@@ -103,10 +101,7 @@
       document.head.appendChild(s);
     });
   }
-  function canSync() { return !!(S.sb && S.user && !S.needLogin); }
-  function isAuthError(e) {
-    return !!e && (e.status === 401 || e.code === 'PGRST301' || e.code === '42501' || /jwt|not authenticated/i.test(e.message || ''));
-  }
+  function canSync() { return !!S.sb; }
 
   var flushing = false, flushTimer = null, retryTimer = null, backoff = 4000;
   function scheduleFlush(ms) { clearTimeout(flushTimer); flushTimer = setTimeout(flush, ms); }
@@ -119,10 +114,10 @@
     paintSync();
     var batch = keys.slice(0, 300).map(function (k) { return S.pending[k]; });
     var rows = batch.map(function (op) {
-      return { user_id: S.user.id, habit_id: op.habit_id, date: op.date, completed: op.completed };
+      return { habit_id: op.habit_id, date: op.date, completed: op.completed };
     });
     try {
-      var r = await S.sb.from('completions').upsert(rows, { onConflict: 'user_id,habit_id,date' });
+      var r = await S.sb.from('completions').upsert(rows, { onConflict: 'habit_id,date' });
       if (r.error) throw r.error;
       batch.forEach(function (op) {
         var k = op.date + '|' + op.habit_id;
@@ -135,25 +130,11 @@
       if (Object.keys(S.pending).length) { flush(); return; }
     } catch (e) {
       flushing = false;
-      if (isAuthError(e)) { await recoverAuth(); }
-      else {
-        clearTimeout(retryTimer);
-        retryTimer = setTimeout(flush, backoff);
-        backoff = Math.min(backoff * 2, 60000);
-      }
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(flush, backoff);
+      backoff = Math.min(backoff * 2, 60000);
     }
     paintSync();
-  }
-
-  async function recoverAuth() {
-    try {
-      var r = await S.sb.auth.refreshSession();
-      if (r.error || !r.data || !r.data.session) throw new Error('no session');
-      scheduleFlush(50);
-    } catch (e) {
-      if (navigator.onLine === false) { clearTimeout(retryTimer); retryTimer = setTimeout(flush, backoff); }
-      else { S.needLogin = true; showLogin(); }
-    }
   }
 
   async function fetchRange(from, to) {
@@ -243,81 +224,29 @@
     flush();
   }
 
-  /* ------------------------------------------------------------------ auth */
-  function setUser(u) {
-    S.user = { id: u.id, email: u.email || '' };
-    save(KEY.user, S.user);
-    S.needLogin = false;
-  }
-
-  function isNetworkError(e) {
-    return !!e && (e.name === 'AuthRetryableFetchError' || /fetch|network|timeout/i.test(e.message || ''));
-  }
-
+  /* ------------------------------------------------------------------ connection (no login) */
   var initing = false;
   async function initSupabase() {
-    if (!CONFIGURED) { paintSync(); return; }
-    if (initing || S.sb) return;
+    if (!CONFIGURED || initing || S.sb) { paintSync(); return; }
     initing = true;
     try {
-      if (!S.user) showLogin();
       try { await loadScript(SDK_URL, 9000); } catch (e) { paintSync(); return; }
       if (!window.supabase || !window.supabase.createClient) return;
       S.sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, {
-        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
       });
-      S.sb.auth.onAuthStateChange(function (evt, session) {
-        if (evt === 'SIGNED_OUT') {
-          setTimeout(function () { S.needLogin = true; showLogin(); }, 0);
-        } else if (session && session.user && (evt === 'SIGNED_IN' || evt === 'TOKEN_REFRESHED')) {
-          setTimeout(function () { setUser(session.user); scheduleFlush(50); }, 0);
-        }
-      });
-      $('lgBtn').disabled = false;
-      var session = null, err = null;
-      try {
-        var res = await S.sb.auth.getSession();
-        session = res && res.data && res.data.session;
-        err = res && res.error;
-      } catch (e) { err = e; }
-      if (session && session.user) { setUser(session.user); hideLogin(); bootSync(); }
-      else if (S.user && (navigator.onLine === false || isNetworkError(err))) { hideLogin(); }   // remembered user, no connection
-      else { S.needLogin = true; showLogin(); }
+      bootSync();
     } finally {
       initing = false;
     }
   }
-
-  function showLogin() { $('login').hidden = false; $('lgBtn').disabled = !S.sb; setTimeout(function () { $('lgEmail').focus(); }, 60); }
-  function hideLogin() { $('login').hidden = true; }
-
-  $('loginForm').addEventListener('submit', async function (e) {
-    e.preventDefault();
-    var err = $('lgErr');
-    err.textContent = '';
-    if (!S.sb) { err.textContent = 'אין חיבור כרגע. נסה שוב כשיש רשת.'; return; }
-    $('lgBtn').disabled = true;
-    try {
-      var r = await S.sb.auth.signInWithPassword({ email: $('lgEmail').value.trim(), password: $('lgPass').value });
-      if (r.error || !r.data || !r.data.user) throw (r.error || new Error('fail'));
-      setUser(r.data.user);
-      $('lgPass').value = '';
-      hideLogin();
-      bootSync();
-      if (S.tab === 'settings') renderSettings();
-    } catch (ex) {
-      err.textContent = 'האימייל או הסיסמה לא נכונים, או שאין חיבור.';
-    }
-    $('lgBtn').disabled = false;
-  });
 
   /* ------------------------------------------------------------------ sync indicator */
   function syncDetailText() {
     var n = Object.keys(S.pending).length;
     var parts = [];
     if (!CONFIGURED) return 'Supabase לא הוגדר. הנתונים נשמרים במכשיר הזה בלבד. כדי לחבר, ממלאים את config.js.';
-    if (!S.user) parts.push('לא מחובר.');
-    else if (!S.sb) parts.push('מצב לא מקוון. הסימונים נשמרים במכשיר ויישלחו כשיהיה חיבור.');
+    if (!S.sb) parts.push('מצב לא מקוון. הסימונים נשמרים במכשיר ויישלחו כשיהיה חיבור.');
     else parts.push('מחובר ומסונכרן.');
     parts.push(n ? 'ממתינים לשליחה: ' + n + '.' : 'הכל נשלח.');
     if (S.lastSync) parts.push('סנכרון אחרון: ' + new Date(S.lastSync).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) + '.');
@@ -725,8 +654,6 @@
   function renderSettings() {
     $('view-settings').innerHTML =
       '<header class="h-head"><h1>הגדרות</h1></header>' +
-      '<section class="set"><h2>חשבון</h2><p>' + (S.user && S.user.email ? esc(S.user.email) : (S.user ? 'מחובר' : 'לא מחובר')) + '</p>' +
-        (CONFIGURED ? (S.user ? '<button type="button" class="btn ghost" id="signOut">התנתקות</button>' : '<button type="button" class="btn" id="signIn">התחברות</button>') : '') + '</section>' +
       '<section class="set"><h2>סנכרון</h2><p id="syncDetail"></p>' +
         (CONFIGURED ? '<button type="button" class="btn ghost" id="syncNow">סנכרון עכשיו</button>' : '') + '</section>' +
       '<section class="set"><h2>ייבוא מהאתר הישן</h2>' +
@@ -737,28 +664,11 @@
     paintSync();
   }
 
-  var signOutArmed = false, signOutTimer = null;
-  $('view-settings').addEventListener('click', async function (e) {
+  $('view-settings').addEventListener('click', function (e) {
     var t = e.target.closest('button');
     if (!t) return;
-    if (t.id === 'signIn') { showLogin(); return; }
     if (t.id === 'syncNow') { bootSync(); return; }
     if (t.id === 'impBtn') { doImport(); return; }
-    if (t.id === 'signOut') {
-      var n = Object.keys(S.pending).length;
-      if (n && !signOutArmed) {
-        signOutArmed = true;
-        t.textContent = 'יש ' + n + ' סימונים שלא נשלחו. לחץ שוב כדי להתנתק';
-        signOutTimer = setTimeout(function () { signOutArmed = false; t.textContent = 'התנתקות'; }, 4000);
-        return;
-      }
-      clearTimeout(signOutTimer); signOutArmed = false;
-      try { await S.sb.auth.signOut(); } catch (ex) {}
-      S.byDate = {}; S.pending = {}; S.user = null; S.first = null; S.loadedFrom = null; S.totals = {};
-      persistDone(); persistPending(); save(KEY.user, null); save(KEY.first, null);
-      showLogin();
-      renderSettings();
-    }
   });
 
   function doImport() {

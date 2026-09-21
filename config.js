@@ -8,6 +8,6 @@
  * While these are empty the app still works: taps are saved on the device only.
  */
 window.HABITS_CONFIG = {
-  SUPABASE_URL: 'https://kfnbtdgdwnzbqvbyvzmt.supabase.co',
-  SUPABASE_ANON_KEY: 'sb_publishable_cLH9y_w9KjD1TRjOpCZsOw_gX1GT4lI'
+  SUPABASE_URL: '',
+  SUPABASE_ANON_KEY: ''
 };

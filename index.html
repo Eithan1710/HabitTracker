@@ -51,22 +51,6 @@
   </div>
 </div>
 
-<!-- Sign in (shown only when Supabase is configured and there is no session) -->
-<div id="login" class="login" hidden role="dialog" aria-modal="true" aria-labelledby="loginTitle">
-  <form id="loginForm" class="login-card">
-    <h1 id="loginTitle">התחברות</h1>
-    <p class="muted">פעם אחת בלבד. אחר כך האתר זוכר אותך.</p>
-    <label>אימייל
-      <input id="lgEmail" type="email" name="email" autocomplete="username" inputmode="email" autocapitalize="none" required>
-    </label>
-    <label>סיסמה
-      <input id="lgPass" type="password" name="password" autocomplete="current-password" required>
-    </label>
-    <p class="err" id="lgErr" role="alert"></p>
-    <button class="btn" id="lgBtn" type="submit">כניסה</button>
-  </form>
-</div>
-
 <script src="config.js"></script>
 <script src="habits.js"></script>
 <script src="app.js"></script>

@@ -295,17 +295,6 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
 .set .msg { color: var(--ok); }
 .ver { text-align: center; color: var(--muted); font-size: .8rem; margin-top: 24px; }
 
-/* ---------- Login ---------- */
-.login { position: fixed; inset: 0; z-index: 60; background: var(--bg); display: grid; place-items: center; padding: 24px; }
-.login-card { width: 100%; max-width: 380px; }
-.login-card h1 { font-size: 1.9rem; font-weight: 700; letter-spacing: -.02em; }
-.login-card label { display: block; margin-top: 16px; font-size: .9rem; color: var(--muted); }
-.login-card input {
-  display: block; width: 100%; margin-top: 6px; padding: 14px; border-radius: 12px;
-  border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; font-size: 16px;
-}
-.err { min-height: 1.4em; margin-top: 10px; color: var(--miss); font-size: .9rem; }
-
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }

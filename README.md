@@ -10,15 +10,16 @@
 
 ## הפעלה (5 דקות)
 1. ב-Supabase: **SQL Editor** > הדבק את `supabase.sql` > Run.
-2. **Authentication > Users > Add user**: אימייל וסיסמה (המשתמש שלך). מומלץ לכבות הרשמה פומבית: **Authentication > Sign In / Providers > Allow new users to sign up: off**.
-3. **Project Settings > API**: העתק את ה-Project URL ואת מפתח ה-`anon` ל-`config.js`. אל תשתמש ב-`service_role`.
-4. העלה את התיקייה לכל אירוח סטטי עם HTTPS (Netlify, Cloudflare Pages, Vercel, GitHub Pages). PWA דורש HTTPS.
-5. באייפון: פתח את הכתובת ב-Safari > Share > **Add to Home Screen**. בפעם הראשונה תתבקש להתחבר, ואחר כך האתר זוכר אותך.
+2. **Project Settings > API**: העתק את ה-Project URL ואת מפתח ה-`anon` ל-`config.js`. אל תשתמש ב-`service_role`.
+3. העלה את התיקייה לכל אירוח סטטי עם HTTPS (Netlify, Cloudflare Pages, Vercel, GitHub Pages). PWA דורש HTTPS.
+4. באייפון: פתח את הכתובת ב-Safari > Share > **Add to Home Screen**.
+
+אין התחברות. האתר משתמש במפתח ה-`anon` הציבורי, וה-RLS מאפשר לו רק לקרוא הרגלים ולקרוא/להוסיף/לעדכן סימונים (בלי מחיקה). מי שמכיר את כתובת האתר יכול לראות ולשנות את הסימונים, אז לא לפרסם אותה.
 
 ## העברת הנתונים הקיימים
 1. באתר הישן: לשונית "השבוע" > "ייצוא נתונים לאתר החדש" > "הכן ייצוא" > "העתק".
 2. באתר החדש: **הגדרות > ייבוא מהאתר הישן** > הדבק > ייבוא.
-   אפשר לייבא שוב בלי חשש: אין כפילויות (מפתח ראשי על משתמש + הרגל + תאריך).
+   אפשר לייבא שוב בלי חשש: אין כפילויות (מפתח ראשי על הרגל + תאריך).
 
 ## איך זה עובד
 - לחיצה על הרגל מעדכנת את המסך ואת `localStorage` מיד, ואז נכנסת לתור שליחה.
