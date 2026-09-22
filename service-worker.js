@@ -5,7 +5,7 @@
  * - Supabase API calls are never intercepted: offline writes are handled by the app's own queue.
  * Bump VERSION when you deploy a new build to force a fresh cache.
  */
-const VERSION = 'hb-v1';
+const VERSION = 'hb-v2';
 const SHELL = [
   './', 'index.html', 'style.css', 'habits.js', 'app.js', 'config.js', 'manifest.json',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'

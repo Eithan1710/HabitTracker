@@ -249,18 +249,20 @@
   var CHECK = '<span class="chk" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 12.5l4 4 8-9"/></svg></span>';
   var CHEV = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
 
+  // Main habit: a full-width row. Time + hint sit under the title, quiet.
   function rowHTML(h, d) {
     var tl = h.time_labels && h.time_labels[d.getDay()];
     var meta = '';
-    if (tl) meta += '<span class="chip">' + esc(tl) + '</span>';
-    if (h.hint) meta += '<span>' + esc(h.hint) + '</span>';
+    if (tl) meta += '<span class="chip"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>' + esc(tl) + '</span>';
+    if (h.hint) meta += '<span class="hint">' + esc(h.hint) + '</span>';
     return '<button type="button" class="row main" data-id="' + esc(h.id) + '" aria-pressed="false" style="--c:var(--' + L.colorOf(h) + ')">' +
       CHECK + '<span class="rt"><b>' + esc(h.title) + '</b>' + (meta ? '<span class="rm">' + meta + '</span>' : '') + '</span></button>';
   }
 
+  // Side habit: a compact tile, two per row on a phone.
   function tileHTML(h) {
     return '<button type="button" class="tile" data-id="' + esc(h.id) + '" aria-pressed="false" style="--c:var(--' + L.colorOf(h) + ')">' +
-      CHECK + '<b>' + esc(h.title) + '</b>' + (h.hint ? '<span>' + esc(h.hint) + '</span>' : '') + '</button>';
+      CHECK + '<span class="tt"><b>' + esc(h.title) + '</b>' + (h.hint ? '<span>' + esc(h.hint) + '</span>' : '') + '</span></button>';
   }
 
   function weekStripHTML(d) {
@@ -271,8 +273,10 @@
       var future = day.getTime() > S.today.getTime();
       var st = L.dayStats(habitsFor(day), day, S.byDate, S.today);
       var show = !future && st.sched > 0;
-      var cls = 'wk' + (ds === dsToday ? ' is-today' : '') + (ds === L.fmt(d) ? ' is-active' : '') + (future ? ' future' : '');
-      cells += '<button type="button" class="' + cls + '" data-day="' + ds + '">' +
+      var full = show && st.done === st.sched;
+      var cls = 'wk' + (ds === dsToday ? ' is-today' : '') + (ds === L.fmt(d) ? ' is-active' : '') + (future ? ' future' : '') + (full ? ' full' : '');
+      cells += '<button type="button" class="' + cls + '" data-day="' + ds + '"' + (future ? ' tabindex="-1" aria-disabled="true"' : '') +
+        ' aria-label="' + esc(dateText(day, { weekday: 'long', day: 'numeric', month: 'long' })) + (show ? ', ' + st.done + ' מתוך ' + st.sched : '') + '">' +
         '<span class="wkl">' + LETTER[i] + '</span>' +
         '<span class="ring sm" style="--p:' + (show ? Math.round(st.pct * 100) : 0) + '"><i>' + day.getDate() + '</i></span>' +
       '</button>';
@@ -290,24 +294,44 @@
     var dt = dateText(d, { day: 'numeric', month: 'long' }) + (d.getFullYear() !== S.today.getFullYear() ? ' ' + d.getFullYear() : '');
 
     $('view-today').innerHTML =
-      '<header class="t-head">' +
-        weekStripHTML(d) +
-        '<div class="t-top">' +
-          '<button type="button" class="ic" data-act="prev" aria-label="היום הקודם"><span class="flip">' + CHEV + '</span></button>' +
-          '<div class="t-date"><h1>' + esc(dateText(d, { weekday: 'long' })) + (rel ? '<span class="rel">' + rel + '</span>' : '') + '</h1><p>' + esc(dt) + '</p></div>' +
-          '<button type="button" class="ic" data-act="next" aria-label="היום הבא"' + (isToday ? ' disabled' : '') + '>' + CHEV + '</button>' +
+      '<div class="today">' +
+        '<header class="t-head">' +
+          '<div class="t-date">' +
+            '<h1>' + esc(dateText(d, { weekday: 'long' })) + (rel ? '<span class="rel' + (isToday ? '' : ' past') + '">' + rel + '</span>' : '') + '</h1>' +
+            '<p>' + esc(dt) + '</p>' +
+          '</div>' +
+          '<div class="t-nav">' +
+            (isToday ? '' : '<button type="button" class="pill" data-act="today">להיום</button>') +
+            '<button type="button" class="ic" data-act="prev" aria-label="היום הקודם"><span class="flip">' + CHEV + '</span></button>' +
+            '<button type="button" class="ic" data-act="next" aria-label="היום הבא"' + (isToday ? ' disabled' : '') + '>' + CHEV + '</button>' +
+          '</div>' +
+        '</header>' +
+        '<aside class="t-aside">' +
+          weekStripHTML(d) +
+          '<section class="summary" id="summary" aria-live="polite">' +
+            '<div class="prog-ring" id="progRing" style="--p:0"><div class="pr-in"><b id="pNum">0/0</b></div></div>' +
+            '<div class="sm-txt"><b id="pText"></b><span id="pSub"></span></div>' +
+          '</section>' +
+        '</aside>' +
+        '<div class="t-main">' +
+          '<section class="group" aria-labelledby="gMain">' +
+            '<div class="g-head"><h2 id="gMain">' + (isToday ? 'מתוכנן להיום' : 'מתוכנן') + '</h2><span class="g-count" id="cMain"></span></div>' +
+            (main.length
+              ? '<div class="rows">' + main.map(function (h) { return rowHTML(h, d); }).join('') + '</div>'
+              : '<p class="g-empty">אין משהו מתוכנן ' + (isToday ? 'היום' : 'ביום הזה') + '. רק משימות הצד.</p>') +
+          '</section>' +
+          (side.length ?
+            '<section class="group side" aria-labelledby="gSide">' +
+              '<div class="g-head"><h2 id="gSide">משימות צד</h2><span class="g-count" id="cSide"></span></div>' +
+              '<div class="tiles">' + side.map(tileHTML).join('') + '</div>' +
+            '</section>' : '') +
         '</div>' +
-        (isToday ? '' : '<button type="button" class="pill" data-act="today">חזרה להיום</button>') +
-        '<div class="prog-ring" id="progRing" style="--p:0"><div class="pr-in"><b id="pNum">0/0</b><span id="pText"></span></div></div>' +
-      '</header>' +
-      '<section class="rows" aria-label="מתוכנן">' + main.map(function (h) { return rowHTML(h, d); }).join('') + '</section>' +
-      (side.length ?
-        '<section class="sides" aria-label="משימות צד"><h2>משימות צד</h2>' +
-        '<div class="tiles">' + side.map(tileHTML).join('') + '</div></section>' : '');
-    paintToday();
+      '</div>';
+    paintToday(false);
   }
 
-  function paintToday() {
+  // Updates checks + counters in place (no re-render), so a tap never moves anything on screen.
+  function paintToday(animate) {
     var ds = L.fmt(S.viewDate);
     var done = S.byDate[ds] || {};
     var els = document.querySelectorAll('#view-today .row, #view-today .tile');
@@ -321,24 +345,40 @@
     var total = mainT + sideT, got = mainD + sideD;
     var complete = total > 0 && got === total;
     var mainComplete = mainT > 0 && mainD === mainT;
-    var text;
-    if (complete) text = 'הכל בוצע';
-    else if (mainComplete) text = 'המתוכנן הושלם';
-    else { var left = total - got; text = left === 1 ? 'נשארה משימה אחת' : 'נשארו ' + left + ' משימות'; }
-    var ring = $('progRing'), pn = $('pNum'), pt = $('pText');
-    if (ring) {
-      ring.style.setProperty('--p', total ? Math.round(got / total * 100) : 0);
-      ring.classList.toggle('full', complete);
+    var text, sub;
+    var left = total - got;
+    if (!total) { text = 'יום חופשי'; sub = 'אין הרגלים ביום הזה'; }
+    else if (complete) { text = 'הכל בוצע'; sub = S.viewDate.getTime() === S.today.getTime() ? 'יום מושלם. כל הכבוד!' : 'יום מושלם'; }
+    else {
+      text = left === 1 ? 'נשארה משימה אחת' : 'נשארו ' + left + ' משימות';
+      sub = mainT ? (mainComplete ? 'המתוכנן הושלם, נשארו משימות צד' : 'מתוכנן ' + mainD + '/' + mainT + (sideT ? ' · צד ' + sideD + '/' + sideT : ''))
+                  : 'צד ' + sideD + '/' + sideT;
     }
-    if (pn) pn.textContent = got + '/' + total;
-    if (pt) pt.textContent = text;
+    var ring = $('progRing'), sm = $('summary');
+    if (ring) ring.style.setProperty('--p', total ? Math.round(got / total * 100) : 0);
+    if (sm) {
+      var was = sm.classList.contains('full');
+      sm.classList.toggle('full', complete);
+      if (animate && complete && !was && !reduceMotion()) { sm.classList.remove('cheer'); void sm.offsetWidth; sm.classList.add('cheer'); }
+    }
+    if ($('pNum')) $('pNum').textContent = total ? got + '/' + total : '—';
+    if ($('pText')) $('pText').textContent = text;
+    if ($('pSub')) $('pSub').textContent = sub;
+    if ($('cMain')) { $('cMain').textContent = mainD + '/' + mainT; $('cMain').classList.toggle('ok', mainComplete); }
+    if ($('cSide')) { $('cSide').textContent = sideD + '/' + sideT; $('cSide').classList.toggle('ok', sideT > 0 && sideD === sideT); }
+    // keep today's ring in the week strip in sync too
+    var wk = document.querySelector('#view-today .wk[data-day="' + ds + '"] .ring');
+    if (wk) {
+      wk.style.setProperty('--p', total ? Math.round(got / total * 100) : 0);
+      wk.parentNode.classList.toggle('full', complete);
+    }
   }
 
   function toggleRow(btn) {
     var id = btn.getAttribute('data-id'), ds = L.fmt(S.viewDate);
     var on = !(S.byDate[ds] && S.byDate[ds][id]);
     setDone(ds, id, on);
-    paintToday();
+    paintToday(true);
     if (on) {
       btn.classList.remove('pop'); void btn.offsetWidth; btn.classList.add('pop');
       if (navigator.vibrate) navigator.vibrate(8);
@@ -382,11 +422,11 @@
 
   function renderHistory() {
     $('view-history').innerHTML =
-      '<header class="h-head"><h1>היסטוריה</h1></header>' +
+      '<div class="h-top"><header class="h-head"><h1>היסטוריה</h1></header>' +
       '<div class="seg big" role="tablist">' +
         '<button type="button" role="tab" data-htab="overview" aria-selected="' + (S.hTab === 'overview') + '">סקירה</button>' +
         '<button type="button" role="tab" data-htab="habit" aria-selected="' + (S.hTab === 'habit') + '">לפי הרגל</button>' +
-      '</div><div id="hBody"></div>';
+      '</div></div><div id="hBody"></div>';
     paintHistory();
     loadHistoryData();
   }
@@ -441,7 +481,7 @@
       '<div><b>' + num(total) + '</b><small>סה״כ בוצעו</small></div>' +
     '</div>';
 
-    html += weekHTML(hs, start) + heatmapHTML(hs, start) + monthHTML(hs, start) + lowestHTML(hs, start);
+    html += '<div class="ov-grid">' + weekHTML(hs, start) + monthHTML(hs, start) + heatmapHTML(hs, start) + lowestHTML(hs, start) + '</div>';
     return html;
   }
 
@@ -467,7 +507,7 @@
         '<span class="ring" style="--p:' + (show ? Math.round(st.pct * 100) : 0) + '"><i>' + d.getDate() + '</i></span>' +
         '<span class="wc">' + (show ? st.done + '/' + st.sched : '—') + '</span></button>';
     }
-    return '<section class="h-sec"><div class="sec-t"><h2>השבוע</h2><div class="nav2">' +
+    return '<section class="h-sec s-week"><div class="sec-t"><h2>השבוע</h2><div class="nav2">' +
       '<button type="button" class="ic sm" data-act="wk-prev" aria-label="שבוע קודם"><span class="flip">' + CHEV + '</span></button>' +
       '<span>' + weekLabel(S.weekStart) + '</span>' +
       '<button type="button" class="ic sm" data-act="wk-next" aria-label="שבוע הבא"' + (isCurrent ? ' disabled' : '') + '>' + CHEV + '</button>' +
@@ -494,7 +534,7 @@
       }
     }
     var days = LETTER.map(function (l) { return '<span>' + l + '</span>'; }).join('');
-    return '<section class="h-sec"><div class="sec-t"><h2>ההתמדה שלי</h2></div><p class="q">איך נראו הימים האחרונים? לחץ על יום לפירוט.</p>' +
+    return '<section class="h-sec s-heat"><div class="sec-t"><h2>ההתמדה שלי</h2></div><p class="q">איך נראו הימים האחרונים? לחץ על יום לפירוט.</p>' +
       '<div class="hm"><div class="hm-days">' + days + '</div><div class="hm-scroll"><div class="hm-months">' + months + '</div><div class="hm-grid">' + cells + '</div></div></div>' +
       '<div class="legend"><span>פחות</span><i data-l="0"></i><i data-l="1"></i><i data-l="2"></i><i data-l="3"></i><i data-l="4"></i><span>יותר</span></div></section>';
   }
@@ -510,7 +550,7 @@
         '<div><dt>היום המוביל</dt><dd>' + (mo.days ? esc(dateText(mo.days.date, { day: 'numeric', month: 'long' })) + ' (' + mo.days.done + '/' + mo.days.sched + ')' : '—') + '</dd></div>' +
         '<div><dt>ההרגל העקבי ביותר</dt><dd>' + (mo.top ? esc(mo.top.habit.title) + ' (' + pctText(mo.top.pct) + ')' : '—') + '</dd></div>' +
       '</dl>';
-    return '<section class="h-sec"><div class="sec-t"><h2>חודשי</h2><div class="nav2">' +
+    return '<section class="h-sec s-month"><div class="sec-t"><h2>חודשי</h2><div class="nav2">' +
       '<button type="button" class="ic sm" data-act="mo-prev" aria-label="חודש קודם"><span class="flip">' + CHEV + '</span></button>' +
       '<span>' + esc(dateText(S.monthRef, { month: 'long', year: 'numeric' })) + '</span>' +
       '<button type="button" class="ic sm" data-act="mo-next" aria-label="חודש הבא"' + (isCurrent ? ' disabled' : '') + '>' + CHEV + '</button>' +
@@ -524,7 +564,7 @@
         '<span class="hn">' + esc(r.habit.title) + '</span><span class="tr"><i style="width:' + Math.round(r.pct * 100) + '%"></i></span>' +
         '<span class="hp">' + pctText(r.pct) + '</span></button>';
     }).join('') : '<p class="empty">אין עדיין נתונים.</p>';
-    return '<section class="h-sec"><div class="sec-t"><h2>לפי הרגל</h2></div><p class="q">אילו הרגלים אני משלים פחות? (30 ימים, מהנמוך לגבוה)</p>' + body + '</section>';
+    return '<section class="h-sec s-rates"><div class="sec-t"><h2>לפי הרגל</h2></div><p class="q">אילו הרגלים אני משלים פחות? (30 ימים, מהנמוך לגבוה)</p>' + body + '</section>';
   }
 
   /* ---- per-habit page ---- */
@@ -575,7 +615,7 @@
       labels = '<div class="bl ends"><span>' + esc(dateText(f, { day: 'numeric', month: 'short' })) + '</span><span>' + esc(dateText(l, { day: 'numeric', month: 'short' })) + '</span></div>';
     }
     var q = unit === 'day' ? 'באילו ימים עשיתי את זה?' : unit === 'week' ? 'איך זה השתנה משבוע לשבוע?' : 'איך זה השתנה מחודש לחודש?';
-    html += '<section class="h-sec"><p class="q">' + q + '</p><div class="bars u-' + unit + '" style="--c:var(--' + L.colorOf(h) + ')">' + bars + '</div>' + labels + '</section>';
+    html += '<section class="h-sec s-bars"><p class="q">' + q + '</p><div class="bars u-' + unit + '" style="--c:var(--' + L.colorOf(h) + ')">' + bars + '</div>' + labels + '</section>';
     return html;
   }
 
