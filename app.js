@@ -49,8 +49,7 @@
     monthRef: L.monthStart(new Date()),
     loadedFrom: null,
     loadedAt: 0,
-    totals: {},
-    lastSync: null
+    totals: {}
   };
   S.hHabit = (S.habits[0] || {}).id || 'gym';
 
@@ -87,7 +86,6 @@
     persistDone();
     persistPending();
     scheduleFlush(250);
-    paintSync();
   }
 
   /* ------------------------------------------------------------------ Supabase sync */
@@ -107,11 +105,10 @@
   function scheduleFlush(ms) { clearTimeout(flushTimer); flushTimer = setTimeout(flush, ms); }
 
   async function flush() {
-    if (flushing || !canSync()) { paintSync(); return; }
+    if (flushing || !canSync()) { return; }
     var keys = Object.keys(S.pending);
-    if (!keys.length) { paintSync(); return; }
+    if (!keys.length) { return; }
     flushing = true;
-    paintSync();
     var batch = keys.slice(0, 300).map(function (k) { return S.pending[k]; });
     var rows = batch.map(function (op) {
       return { habit_id: op.habit_id, date: op.date, completed: op.completed };
@@ -124,7 +121,6 @@
         if (S.pending[k] && S.pending[k].ts === op.ts) delete S.pending[k];
       });
       persistPending();
-      S.lastSync = Date.now();
       backoff = 4000;
       flushing = false;
       if (Object.keys(S.pending).length) { flush(); return; }
@@ -134,7 +130,6 @@
       retryTimer = setTimeout(flush, backoff);
       backoff = Math.min(backoff * 2, 60000);
     }
-    paintSync();
   }
 
   async function fetchRange(from, to) {
@@ -160,15 +155,6 @@
       if (op.date >= from && op.date <= to) markLocal(op.date, op.habit_id, op.completed);
     });
     persistDone();
-  }
-
-  async function syncDay(ds) {
-    if (!canSync()) return;
-    try {
-      var rows = await fetchRange(ds, ds);
-      applyServer(ds, ds, rows);
-      if (S.tab === 'today' && L.fmt(S.viewDate) === ds) paintToday();
-    } catch (e) { /* offline: keep local */ }
   }
 
   async function ensureFirst() {
@@ -219,7 +205,9 @@
 
   function bootSync() {
     refreshHabits();
-    syncDay(L.fmt(S.viewDate));
+    ensureData(L.fmt(L.weekStart(S.viewDate))).then(function () {
+      if (S.tab === 'today') renderToday();
+    });
     ensureFirst();
     flush();
   }
@@ -227,10 +215,10 @@
   /* ------------------------------------------------------------------ connection (no login) */
   var initing = false;
   async function initSupabase() {
-    if (!CONFIGURED || initing || S.sb) { paintSync(); return; }
+    if (!CONFIGURED || initing || S.sb) { return; }
     initing = true;
     try {
-      try { await loadScript(SDK_URL, 9000); } catch (e) { paintSync(); return; }
+      try { await loadScript(SDK_URL, 9000); } catch (e) { return; }
       if (!window.supabase || !window.supabase.createClient) return;
       S.sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, {
         auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
@@ -241,41 +229,19 @@
     }
   }
 
-  /* ------------------------------------------------------------------ sync indicator */
-  function syncDetailText() {
-    var n = Object.keys(S.pending).length;
-    var parts = [];
-    if (!CONFIGURED) return 'Supabase לא הוגדר. הנתונים נשמרים במכשיר הזה בלבד. כדי לחבר, ממלאים את config.js.';
-    if (!S.sb) parts.push('מצב לא מקוון. הסימונים נשמרים במכשיר ויישלחו כשיהיה חיבור.');
-    else parts.push('מחובר ומסונכרן.');
-    parts.push(n ? 'ממתינים לשליחה: ' + n + '.' : 'הכל נשלח.');
-    if (S.lastSync) parts.push('סנכרון אחרון: ' + new Date(S.lastSync).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) + '.');
-    return parts.join(' ');
-  }
-  function paintSync() {
-    var n = Object.keys(S.pending).length;
-    var b = $('syncBadge');
-    if (b) {
-      if (CONFIGURED && n > 0) { b.hidden = false; b.textContent = flushing ? 'שולח…' : 'ממתין לסנכרון (' + n + ')'; }
-      else b.hidden = true;
-    }
-    var d = $('syncDetail');
-    if (d) d.textContent = syncDetailText();
-  }
-
   /* ------------------------------------------------------------------ navigation */
+  // Sync runs silently: no status text, no badges, nothing for the user to manage.
   function go(tab) {
     S.tab = tab;
-    ['today', 'history', 'settings'].forEach(function (t) {
+    ['today', 'history'].forEach(function (t) {
       $('view-' + t).hidden = t !== tab;
       $('nav-' + t).setAttribute('aria-current', t === tab ? 'page' : 'false');
     });
     if (tab === 'today') renderToday();
     if (tab === 'history') renderHistory();
-    if (tab === 'settings') renderSettings();
     window.scrollTo(0, 0);
   }
-  ['today', 'history', 'settings'].forEach(function (t) {
+  ['today', 'history'].forEach(function (t) {
     $('nav-' + t).addEventListener('click', function () { go(t); });
   });
 
@@ -283,15 +249,35 @@
   var CHECK = '<span class="chk" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 12.5l4 4 8-9"/></svg></span>';
   var CHEV = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
 
-  function rowHTML(h, d, kind) {
+  function rowHTML(h, d) {
     var tl = h.time_labels && h.time_labels[d.getDay()];
     var meta = '';
-    if (kind === 'main') {
-      if (tl) meta += '<span class="chip">' + esc(tl) + '</span>';
-      if (h.hint) meta += '<span>' + esc(h.hint) + '</span>';
-    } else if (h.hint) meta = '<span>' + esc(h.hint) + '</span>';
-    return '<button type="button" class="row ' + kind + '" data-id="' + esc(h.id) + '" aria-pressed="false" style="--c:var(--' + L.colorOf(h) + ')">' +
+    if (tl) meta += '<span class="chip">' + esc(tl) + '</span>';
+    if (h.hint) meta += '<span>' + esc(h.hint) + '</span>';
+    return '<button type="button" class="row main" data-id="' + esc(h.id) + '" aria-pressed="false" style="--c:var(--' + L.colorOf(h) + ')">' +
       CHECK + '<span class="rt"><b>' + esc(h.title) + '</b>' + (meta ? '<span class="rm">' + meta + '</span>' : '') + '</span></button>';
+  }
+
+  function tileHTML(h) {
+    return '<button type="button" class="tile" data-id="' + esc(h.id) + '" aria-pressed="false" style="--c:var(--' + L.colorOf(h) + ')">' +
+      CHECK + '<b>' + esc(h.title) + '</b>' + (h.hint ? '<span>' + esc(h.hint) + '</span>' : '') + '</button>';
+  }
+
+  function weekStripHTML(d) {
+    var ws = L.weekStart(d), dsToday = L.fmt(S.today);
+    var cells = '';
+    for (var i = 0; i < 7; i++) {
+      var day = L.addDays(ws, i), ds = L.fmt(day);
+      var future = day.getTime() > S.today.getTime();
+      var st = L.dayStats(habitsFor(day), day, S.byDate, S.today);
+      var show = !future && st.sched > 0;
+      var cls = 'wk' + (ds === dsToday ? ' is-today' : '') + (ds === L.fmt(d) ? ' is-active' : '') + (future ? ' future' : '');
+      cells += '<button type="button" class="' + cls + '" data-day="' + ds + '">' +
+        '<span class="wkl">' + LETTER[i] + '</span>' +
+        '<span class="ring sm" style="--p:' + (show ? Math.round(st.pct * 100) : 0) + '"><i>' + day.getDate() + '</i></span>' +
+      '</button>';
+    }
+    return '<nav class="wk-strip" aria-label="ימי השבוע">' + cells + '</nav>';
   }
 
   function renderToday() {
@@ -305,49 +291,47 @@
 
     $('view-today').innerHTML =
       '<header class="t-head">' +
+        weekStripHTML(d) +
         '<div class="t-top">' +
           '<button type="button" class="ic" data-act="prev" aria-label="היום הקודם"><span class="flip">' + CHEV + '</span></button>' +
           '<div class="t-date"><h1>' + esc(dateText(d, { weekday: 'long' })) + (rel ? '<span class="rel">' + rel + '</span>' : '') + '</h1><p>' + esc(dt) + '</p></div>' +
           '<button type="button" class="ic" data-act="next" aria-label="היום הבא"' + (isToday ? ' disabled' : '') + '>' + CHEV + '</button>' +
         '</div>' +
         (isToday ? '' : '<button type="button" class="pill" data-act="today">חזרה להיום</button>') +
-        '<div class="prog"><span id="pText"></span><div class="prog-bar"><i id="pFill"></i></div></div>' +
-        '<span class="badge" id="syncBadge" hidden></span>' +
+        '<div class="prog-ring" id="progRing" style="--p:0"><div class="pr-in"><b id="pNum">0/0</b><span id="pText"></span></div></div>' +
       '</header>' +
-      '<section class="rows" aria-label="מתוכנן">' + main.map(function (h) { return rowHTML(h, d, 'main'); }).join('') + '</section>' +
+      '<section class="rows" aria-label="מתוכנן">' + main.map(function (h) { return rowHTML(h, d); }).join('') + '</section>' +
       (side.length ?
-        '<section class="sides" aria-label="משימות צד"><div class="side-h"><span>משימות צד</span><span id="sideCount"></span></div>' +
-        '<div class="side-list">' + side.map(function (h) { return rowHTML(h, d, 'side'); }).join('') + '</div></section>' : '');
+        '<section class="sides" aria-label="משימות צד"><h2>משימות צד</h2>' +
+        '<div class="tiles">' + side.map(tileHTML).join('') + '</div></section>' : '');
     paintToday();
-    paintSync();
   }
 
   function paintToday() {
     var ds = L.fmt(S.viewDate);
     var done = S.byDate[ds] || {};
-    var rows = document.querySelectorAll('#view-today .row');
+    var els = document.querySelectorAll('#view-today .row, #view-today .tile');
     var mainT = 0, mainD = 0, sideT = 0, sideD = 0;
-    Array.prototype.forEach.call(rows, function (btn) {
+    Array.prototype.forEach.call(els, function (btn) {
       var on = !!done[btn.getAttribute('data-id')];
       btn.classList.toggle('on', on);
       btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-      if (btn.classList.contains('main')) { mainT++; if (on) mainD++; } else { sideT++; if (on) sideD++; }
+      if (btn.classList.contains('row')) { mainT++; if (on) mainD++; } else { sideT++; if (on) sideD++; }
     });
-    var total = mainT || sideT, got = mainT ? mainD : sideD;
-    var complete = (mainT ? mainD === mainT : true) && (sideT ? sideD === sideT : true);
+    var total = mainT + sideT, got = mainD + sideD;
+    var complete = total > 0 && got === total;
     var mainComplete = mainT > 0 && mainD === mainT;
     var text;
-    if (complete) text = 'הכל בוצע ✓';
-    else if (mainComplete) text = 'המשימות המתוכננות הושלמו ✓';
+    if (complete) text = 'הכל בוצע';
+    else if (mainComplete) text = 'המתוכנן הושלם';
     else { var left = total - got; text = left === 1 ? 'נשארה משימה אחת' : 'נשארו ' + left + ' משימות'; }
-    var fill = $('pFill'), pt = $('pText');
-    if (fill) {
-      fill.style.width = (total ? Math.round(got / total * 100) : 0) + '%';
-      fill.parentNode.parentNode.classList.toggle('full', mainComplete || complete);
+    var ring = $('progRing'), pn = $('pNum'), pt = $('pText');
+    if (ring) {
+      ring.style.setProperty('--p', total ? Math.round(got / total * 100) : 0);
+      ring.classList.toggle('full', complete);
     }
-    if (pt) pt.textContent = text + (complete ? '' : '  ' + got + '/' + total);
-    var sc = $('sideCount');
-    if (sc) sc.textContent = sideD + '/' + sideT;
+    if (pn) pn.textContent = got + '/' + total;
+    if (pt) pt.textContent = text;
   }
 
   function toggleRow(btn) {
@@ -364,12 +348,16 @@
   function setViewDate(d) {
     S.viewDate = d;
     renderToday();
-    syncDay(L.fmt(d));
+    ensureData(L.fmt(L.weekStart(d))).then(function () {
+      if (S.tab === 'today' && L.fmt(S.viewDate) === L.fmt(d)) { renderToday(); }
+    });
   }
 
   $('view-today').addEventListener('click', function (e) {
-    var row = e.target.closest('.row');
+    var row = e.target.closest('.row, .tile');
     if (row) { toggleRow(row); return; }
+    var wk = e.target.closest('.wk-strip .wk');
+    if (wk && !wk.classList.contains('future')) { setViewDate(L.parse(wk.getAttribute('data-day'))); return; }
     var b = e.target.closest('[data-act]');
     if (!b || b.disabled) return;
     var a = b.getAttribute('data-act');
@@ -378,7 +366,7 @@
     else if (a === 'today') setViewDate(S.today);
   });
   $('view-today').addEventListener('animationend', function (e) {
-    var row = e.target.closest && e.target.closest('.row');
+    var row = e.target.closest && e.target.closest('.row, .tile');
     if (row) row.classList.remove('pop');
   });
 
@@ -650,57 +638,6 @@
   });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeSheet(); });
 
-  /* ------------------------------------------------------------------ SETTINGS */
-  function renderSettings() {
-    $('view-settings').innerHTML =
-      '<header class="h-head"><h1>הגדרות</h1></header>' +
-      '<section class="set"><h2>סנכרון</h2><p id="syncDetail"></p>' +
-        (CONFIGURED ? '<button type="button" class="btn ghost" id="syncNow">סנכרון עכשיו</button>' : '') + '</section>' +
-      '<section class="set"><h2>ייבוא מהאתר הישן</h2>' +
-        '<p>באתר הישן: פתח "ייצוא נתונים", העתק את הטקסט והדבק כאן. אפשר לייבא שוב בבטחה, אין כפילויות.</p>' +
-        '<textarea id="impText" rows="4" dir="ltr" spellcheck="false" placeholder="{ &quot;format&quot;: &quot;habits-export-v1&quot; ... }"></textarea>' +
-        '<button type="button" class="btn ghost" id="impBtn">ייבוא</button><p class="msg" id="impMsg" role="status"></p></section>' +
-      '<p class="ver">גרסה 1.0</p>';
-    paintSync();
-  }
-
-  $('view-settings').addEventListener('click', function (e) {
-    var t = e.target.closest('button');
-    if (!t) return;
-    if (t.id === 'syncNow') { bootSync(); return; }
-    if (t.id === 'impBtn') { doImport(); return; }
-  });
-
-  function doImport() {
-    var msg = $('impMsg'), txt = $('impText').value.trim();
-    msg.textContent = '';
-    if (!txt) { msg.textContent = 'הדבק קודם את טקסט הייצוא.'; return; }
-    var data;
-    try { data = JSON.parse(txt); } catch (e) { msg.textContent = 'הטקסט לא תקין. ודא שהעתקת את כולו.'; return; }
-    var rows = Array.isArray(data) ? data : (data && data.completions);
-    if (!Array.isArray(rows)) { msg.textContent = 'לא נמצאו סימונים בקובץ.'; return; }
-    var ids = {};
-    S.habits.forEach(function (h) { ids[h.id] = 1; });
-    var limit = L.fmt(L.addDays(S.today, 1));
-    var seen = {}, count = 0, skipped = 0;
-    rows.forEach(function (r) {
-      var ds = r && r.date, id = r && (r.habit || r.habit_id);
-      if (typeof ds !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(ds) || ds > limit || !ids[id]) { skipped++; return; }
-      var k = ds + '|' + id;
-      if (seen[k]) return;
-      seen[k] = 1;
-      markLocal(ds, id, true);
-      enqueue(ds, id, true);
-      count++;
-    });
-    persistDone(); persistPending();
-    S.loadedFrom = null;
-    msg.textContent = 'יובאו ' + count + ' סימונים' + (skipped ? ' (' + skipped + ' דולגו)' : '') + '. הם יישלחו לענן ברקע.';
-    $('impText').value = '';
-    scheduleFlush(100);
-    paintSync();
-  }
-
   /* ------------------------------------------------------------------ lifecycle */
   function refreshDay() {
     var nt = L.midnight(new Date());
@@ -717,11 +654,13 @@
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState !== 'visible') return;
     refreshDay();
-    if (S.tab === 'today') syncDay(L.fmt(S.viewDate));
+    S.loadedFrom = null;
+    if (S.tab === 'today') {
+      ensureData(L.fmt(L.weekStart(S.viewDate))).then(function () { if (S.tab === 'today') renderToday(); });
+    }
     flush();
   });
   window.addEventListener('online', function () { backoff = 4000; flush(); if (!S.sb) initSupabase(); });
-  window.addEventListener('offline', paintSync);
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
