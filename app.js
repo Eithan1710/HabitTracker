@@ -8,7 +8,7 @@
   var L = window.HabitLogic;
   var CFG = window.HABITS_CONFIG || {};
   var SDK_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js';
-  var KEY = { habits: 'hb:v1:habits', done: 'hb:v1:done', pending: 'hb:v1:pending', first: 'hb:v1:first' };
+  var KEY = { habits: 'hb:v1:habits', done: 'hb:v1:done', pending: 'hb:v1:pending', first: 'hb:v1:first', period: 'hb:v1:period' };
   var LETTER = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
   var CONFIGURED = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY);
 
@@ -45,13 +45,16 @@
     scope: 'main',
     hHabit: 'gym',
     hRange: '30',
+    period: load(KEY.period, 'month'),
     weekStart: L.weekStart(L.midnight(new Date())),
     monthRef: L.monthStart(new Date()),
+    yearRef: L.yearStart(new Date()),
     loadedFrom: null,
     loadedAt: 0,
     totals: {}
   };
   S.hHabit = (S.habits[0] || {}).id || 'gym';
+  if (['week', 'month', 'year'].indexOf(S.period) < 0) S.period = 'month';
 
   function habitsFor(d) { return S.habits.filter(function (h) { return L.isScheduled(h, d); }).sort(bySort); }
   function scopeHabits() { return S.habits.filter(function (h) { return S.scope === 'all' || h.kind === S.scope; }); }
@@ -413,6 +416,9 @@
   /* ------------------------------------------------------------------ HISTORY */
   var SCOPES = [['main', 'מתוכננות'], ['side', 'משימות צד'], ['all', 'הכל']];
   var RANGES = [['7', '7 ימים'], ['30', '30 יום'], ['90', '3 חודשים'], ['all', 'הכל']];
+  var PERIODS = [['week', 'שבוע'], ['month', 'חודש'], ['year', 'שנה']];
+  // Rolling window behind the headline % and the per-habit list, per selected period.
+  var ROLLING = { week: { days: 7, text: '7 ימים' }, month: { days: 30, text: '30 ימים' }, year: { days: 365, text: 'שנה' } };
 
   function seg(items, active, attr) {
     return '<div class="seg" role="group">' + items.map(function (it) {
@@ -441,6 +447,10 @@
     else from = L.addDays(L.weekStart(S.today), -7 * 25);
     if (S.weekStart < from) from = S.weekStart;
     if (L.monthStart(S.monthRef) < from) from = L.monthStart(S.monthRef);
+    if (S.hTab === 'overview' && S.period === 'year') {
+      if (S.yearRef < from) from = S.yearRef;
+      if (L.addDays(S.today, -364) < from) from = L.addDays(S.today, -364);
+    }
     await ensureData(L.fmt(from));
     if (S.hTab === 'overview') {
       var hs = scopeHabits();
@@ -469,19 +479,24 @@
   function overviewHTML(start) {
     var hs = scopeHabits();
     var today = S.today;
-    var r30 = L.rangeStats(hs, L.addDays(today, -29), today, S.byDate, today, start);
+    var roll = ROLLING[S.period];
+    var rr = L.rangeStats(hs, L.addDays(today, -(roll.days - 1)), today, S.byDate, today, start);
     var streak = L.perfectDayStreak(hs, start || today, today, S.byDate, today, start);
     var total = S.totals[S.scope] !== undefined ? S.totals[S.scope] : L.totalDone(hs, S.byDate);
 
-    var html = '<div class="scope">' + seg(SCOPES, S.scope, 'data-scope') + '</div>';
+    var html = '<div class="ov-ctl"><div class="period" aria-label="טווח זמן">' + seg(PERIODS, S.period, 'data-period') + '</div>' +
+      '<div class="scope">' + seg(SCOPES, S.scope, 'data-scope') + '</div></div>';
 
     html += '<div class="stats">' +
-      '<div><b>' + pctText(r30.pct) + '</b><small>ביצוע ב-30 ימים</small></div>' +
+      '<div><b>' + pctText(rr.pct) + '</b><small>ביצוע ' + (S.period === 'year' ? 'בשנה האחרונה' : 'ב-' + roll.text) + '</small></div>' +
       '<div><b>' + streak.current + '</b><small>ימים מושלמים ברצף</small></div>' +
       '<div><b>' + num(total) + '</b><small>סה״כ בוצעו</small></div>' +
     '</div>';
 
-    html += '<div class="ov-grid">' + weekHTML(hs, start) + monthHTML(hs, start) + heatmapHTML(hs, start) + lowestHTML(hs, start) + '</div>';
+    var cards = S.period === 'week' ? weekHTML(hs, start) + weekFactsHTML(hs, start)
+      : S.period === 'year' ? yearHTML(hs, start) + yearBarsHTML(hs, start)
+      : weekHTML(hs, start) + monthHTML(hs, start);
+    html += '<div class="ov-grid">' + cards + heatmapHTML(hs, start) + lowestHTML(hs, start) + '</div>';
     return html;
   }
 
@@ -539,32 +554,81 @@
       '<div class="legend"><span>פחות</span><i data-l="0"></i><i data-l="1"></i><i data-l="2"></i><i data-l="3"></i><i data-l="4"></i><span>יותר</span></div></section>';
   }
 
-  function monthHTML(hs, start) {
-    var mo = L.monthOverview(hs, S.monthRef, S.byDate, S.today, start);
-    var isCurrent = S.monthRef.getTime() >= L.monthStart(S.today).getTime();
-    var rows;
-    if (mo.avg === null) rows = '<p class="empty">אין עדיין נתונים בחודש הזה.</p>';
-    else rows =
-      '<dl class="facts">' +
+  // Neutral facts for one calendar period (week / month / year).
+  function factsHTML(mo, emptyText) {
+    if (mo.avg === null) return '<p class="empty">' + emptyText + '</p>';
+    return '<dl class="facts">' +
         '<div><dt>ממוצע ביצוע</dt><dd>' + pctText(mo.avg) + '</dd></div>' +
         '<div><dt>היום המוביל</dt><dd>' + (mo.days ? esc(dateText(mo.days.date, { day: 'numeric', month: 'long' })) + ' (' + mo.days.done + '/' + mo.days.sched + ')' : '—') + '</dd></div>' +
         '<div><dt>ההרגל העקבי ביותר</dt><dd>' + (mo.top ? esc(mo.top.habit.title) + ' (' + pctText(mo.top.pct) + ')' : '—') + '</dd></div>' +
       '</dl>';
-    return '<section class="h-sec s-month"><div class="sec-t"><h2>חודשי</h2><div class="nav2">' +
-      '<button type="button" class="ic sm" data-act="mo-prev" aria-label="חודש קודם"><span class="flip">' + CHEV + '</span></button>' +
-      '<span>' + esc(dateText(S.monthRef, { month: 'long', year: 'numeric' })) + '</span>' +
-      '<button type="button" class="ic sm" data-act="mo-next" aria-label="חודש הבא"' + (isCurrent ? ' disabled' : '') + '>' + CHEV + '</button>' +
-      '</div></div>' + rows + '</section>';
+  }
+
+  // Period title + optional prev/next navigation (nav: [prevAct, nextAct, prevLabel, nextLabel, isCurrent]).
+  function periodHead(title, label, nav) {
+    if (!nav) return '<div class="sec-t"><h2>' + title + '</h2><div class="nav2"><span>' + esc(label) + '</span></div></div>';
+    return '<div class="sec-t"><h2>' + title + '</h2><div class="nav2">' +
+      '<button type="button" class="ic sm" data-act="' + nav[0] + '" aria-label="' + nav[2] + '"><span class="flip">' + CHEV + '</span></button>' +
+      '<span>' + esc(label) + '</span>' +
+      '<button type="button" class="ic sm" data-act="' + nav[1] + '" aria-label="' + nav[3] + '"' + (nav[4] ? ' disabled' : '') + '>' + CHEV + '</button>' +
+      '</div></div>';
+  }
+
+  function monthHTML(hs, start) {
+    var mo = L.monthOverview(hs, S.monthRef, S.byDate, S.today, start);
+    var isCurrent = S.monthRef.getTime() >= L.monthStart(S.today).getTime();
+    return '<section class="h-sec s-month">' +
+      periodHead('חודשי', dateText(S.monthRef, { month: 'long', year: 'numeric' }), ['mo-prev', 'mo-next', 'חודש קודם', 'חודש הבא', isCurrent]) +
+      factsHTML(mo, 'אין עדיין נתונים בחודש הזה.') + '</section>';
+  }
+
+  // Week view: facts for the same week the "השבוע" card is showing (its arrows drive both).
+  function weekFactsHTML(hs, start) {
+    var mo = L.periodOverview(hs, S.weekStart, L.addDays(S.weekStart, 6), S.byDate, S.today, start);
+    return '<section class="h-sec s-month">' + periodHead('שבועי', weekLabel(S.weekStart), null) +
+      factsHTML(mo, 'אין עדיין נתונים בשבוע הזה.') + '</section>';
+  }
+
+  function yearHTML(hs, start) {
+    var mo = L.periodOverview(hs, S.yearRef, L.yearEnd(S.yearRef), S.byDate, S.today, start);
+    var isCurrent = S.yearRef.getFullYear() >= S.today.getFullYear();
+    return '<section class="h-sec s-month">' +
+      periodHead('שנתי', String(S.yearRef.getFullYear()), ['yr-prev', 'yr-next', 'שנה קודמת', 'שנה הבאה', isCurrent]) +
+      factsHTML(mo, 'אין עדיין נתונים בשנה הזו.') + '</section>';
+  }
+
+  // Year view: one bar per month. Tapping a month opens it in the month view.
+  function yearBarsHTML(hs, start) {
+    var y = S.yearRef.getFullYear();
+    var ser = L.groupSeries(hs, S.yearRef, L.yearEnd(S.yearRef), 'month', S.byDate, S.today, start);
+    var any = false, bars = '', labels = '';
+    for (var m = 0; m < 12; m++) {
+      var ms = new Date(y, m, 1);
+      var future = ms.getTime() > S.today.getTime();
+      var pct = ser[m] ? ser[m].pct : null;
+      if (pct !== null) any = true;
+      var height = pct === null ? 0 : Math.max(pct * 100, 4);
+      var lbl = dateText(ms, { month: 'long' }) + ', ' + pctText(pct);
+      bars += '<button type="button" class="b' + (pct === null ? ' na' : pct === 0 ? ' z' : '') + '" style="--h:' + height.toFixed(0) + '%" data-month="' + L.fmt(ms) + '"' +
+        (future ? ' disabled' : '') + ' title="' + esc(lbl) + '" aria-label="' + esc(lbl) + '"><i></i></button>';
+      labels += '<span>' + esc(dateText(ms, { month: 'short' })) + '</span>';
+    }
+    var body = any
+      ? '<p class="q">איך זה השתנה לאורך השנה? לחץ על חודש לפירוט.</p>' +
+        '<div class="bars u-month" style="--c:var(--ok)">' + bars + '</div><div class="bl twelve">' + labels + '</div>'
+      : '<p class="empty">אין עדיין נתונים בשנה הזו.</p>';
+    return '<section class="h-sec s-year">' + periodHead('חודש אחר חודש', String(y), null) + body + '</section>';
   }
 
   function lowestHTML(hs, start) {
-    var rates = L.habitRates(hs, L.addDays(S.today, -29), S.today, S.byDate, S.today, start);
+    var roll = ROLLING[S.period];
+    var rates = L.habitRates(hs, L.addDays(S.today, -(roll.days - 1)), S.today, S.byDate, S.today, start);
     var body = rates.length ? rates.map(function (r) {
       return '<button type="button" class="hb" data-habit="' + esc(r.habit.id) + '" style="--c:var(--' + L.colorOf(r.habit) + ')">' +
         '<span class="hn">' + esc(r.habit.title) + '</span><span class="tr"><i style="width:' + Math.round(r.pct * 100) + '%"></i></span>' +
         '<span class="hp">' + pctText(r.pct) + '</span></button>';
     }).join('') : '<p class="empty">אין עדיין נתונים.</p>';
-    return '<section class="h-sec s-rates"><div class="sec-t"><h2>לפי הרגל</h2></div><p class="q">אילו הרגלים אני משלים פחות? (30 ימים, מהנמוך לגבוה)</p>' + body + '</section>';
+    return '<section class="h-sec s-rates"><div class="sec-t"><h2>לפי הרגל</h2></div><p class="q">אילו הרגלים אני משלים פחות? (' + roll.text + ', מהנמוך לגבוה)</p>' + body + '</section>';
   }
 
   /* ---- per-habit page ---- */
@@ -625,6 +689,12 @@
   $('view-history').addEventListener('click', function (e) {
     var t;
     if ((t = e.target.closest('[data-htab]'))) { S.hTab = t.getAttribute('data-htab'); repaintAndLoad(); return; }
+    if ((t = e.target.closest('[data-period]'))) { S.period = t.getAttribute('data-period'); save(KEY.period, S.period); repaintAndLoad(); return; }
+    if ((t = e.target.closest('[data-month]'))) {
+      if (t.disabled) return;
+      S.monthRef = L.parse(t.getAttribute('data-month')); S.period = 'month'; save(KEY.period, S.period);
+      repaintAndLoad(); return;
+    }
     if ((t = e.target.closest('[data-scope]'))) { S.scope = t.getAttribute('data-scope'); repaintAndLoad(); return; }
     if ((t = e.target.closest('[data-range]'))) { S.hRange = t.getAttribute('data-range'); repaintAndLoad(); return; }
     if ((t = e.target.closest('[data-habit]'))) { S.hHabit = t.getAttribute('data-habit'); S.hTab = 'habit'; renderHistory(); window.scrollTo(0, 0); return; }
@@ -636,6 +706,8 @@
       else if (a === 'wk-next') S.weekStart = L.addDays(S.weekStart, 7);
       else if (a === 'mo-prev') S.monthRef = new Date(S.monthRef.getFullYear(), S.monthRef.getMonth() - 1, 1);
       else if (a === 'mo-next') S.monthRef = new Date(S.monthRef.getFullYear(), S.monthRef.getMonth() + 1, 1);
+      else if (a === 'yr-prev') S.yearRef = new Date(S.yearRef.getFullYear() - 1, 0, 1);
+      else if (a === 'yr-next') S.yearRef = new Date(S.yearRef.getFullYear() + 1, 0, 1);
       repaintAndLoad();
     }
   });
@@ -687,6 +759,7 @@
     if (wasToday) S.viewDate = nt;
     S.weekStart = L.weekStart(nt);
     S.monthRef = L.monthStart(nt);
+    S.yearRef = L.yearStart(nt);
     S.loadedFrom = null;
     go(S.tab);
   }

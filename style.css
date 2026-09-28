@@ -312,6 +312,13 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
 .scope .seg { background: transparent; padding: 0; gap: 6px; }
 .scope .seg button { flex: none; border-radius: 999px; padding: 6px 14px; background: var(--surface); font-size: .85rem; }
 .scope .seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); box-shadow: none; }
+/* overview controls: time range (week / month / year) + habit scope */
+.ov-ctl { display: grid; gap: 12px; margin-top: 14px; }
+.ov-ctl .scope { margin-top: 0; }
+@media (min-width: 900px) {
+  .ov-ctl { grid-template-columns: 360px auto; justify-content: space-between; align-items: center; }
+  .ov-ctl .scope { grid-row: 1; grid-column: 2; }
+}
 
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 14px; padding: 18px 4px; background: var(--surface); border-radius: 20px; }
 .stats > div { text-align: center; padding: 0 6px; border-inline-start: 1px solid var(--line); }
@@ -391,6 +398,13 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
 .bars .b.z i { background: var(--line); }
 .bl { display: flex; direction: ltr; margin-top: 6px; font-size: 11px; color: var(--muted); }
 .bl.seven span { flex: 1; text-align: center; }
+.bl.twelve { gap: 4px; }
+.bl.twelve span { flex: 1; min-width: 0; text-align: center; overflow: hidden; white-space: nowrap; }
+/* year view: month bars are buttons (tap a month to open it) */
+.bars button.b { appearance: none; border: 0; background: transparent; padding: 0; cursor: pointer; border-radius: 6px; }
+.bars button.b:not(:disabled):hover { background: var(--soft); }
+.bars button.b:disabled { cursor: default; }
+.s-year .bars { margin-top: 4px; }
 .bl.ends { justify-content: space-between; }
 
 /* ---------- Day sheet ---------- */

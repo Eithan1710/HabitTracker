@@ -60,6 +60,8 @@
   function weekStart(d) { return addDays(d, -d.getDay()); }
   function monthStart(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
   function monthEnd(d) { return new Date(d.getFullYear(), d.getMonth() + 1, 0); }
+  function yearStart(d) { return new Date(d.getFullYear(), 0, 1); }
+  function yearEnd(d) { return new Date(d.getFullYear(), 11, 31); }
   function maxDate(a, b) { return a.getTime() >= b.getTime() ? a : b; }
   function minDate(a, b) { return a.getTime() <= b.getTime() ? a : b; }
 
@@ -159,9 +161,8 @@
     });
   }
 
-  // Calendar month summary (neutral facts only).
-  function monthOverview(habits, monthDate, byDate, today, start) {
-    var from = monthStart(monthDate), to = monthEnd(monthDate);
+  // Summary of any calendar period [from, to] (neutral facts only).
+  function periodOverview(habits, from, to, byDate, today, start) {
     var total = rangeStats(habits, from, to, byDate, today, start);
     var best = null;
     var a = start ? maxDate(from, start) : from;
@@ -175,7 +176,11 @@
     }
     var rates = habitRates(habits, from, to, byDate, today, start);
     var top = rates.length ? rates[rates.length - 1] : null;
-    return { avg: total.pct, days: best, top: top };
+    return { avg: total.pct, num: total.num, den: total.den, days: best, top: top };
+  }
+
+  function monthOverview(habits, monthDate, byDate, today, start) {
+    return periodOverview(habits, monthStart(monthDate), monthEnd(monthDate), byDate, today, start);
   }
 
   /* ---------- Chart buckets ---------- */
@@ -197,22 +202,27 @@
     return out;
   }
 
-  function series(h, from, to, unit, byDate, today, start) {
+  // Completion of a set of habits per bucket (day / week / month).
+  function groupSeries(habits, from, to, unit, byDate, today, start) {
     var last = minDate(to, today);
     return buckets(from, last, unit).map(function (b) {
-      var r = rangeStats([h], b.start, b.end, byDate, today, start);
+      var r = rangeStats(habits, b.start, b.end, byDate, today, start);
       return { start: b.start, end: b.end, num: r.num, den: r.den, pct: r.pct };
     });
+  }
+
+  function series(h, from, to, unit, byDate, today, start) {
+    return groupSeries([h], from, to, unit, byDate, today, start);
   }
 
   var api = {
     HABITS: HABITS, ALL_DAYS: ALL_DAYS, colorOf: colorOf, normalizeHabit: normalizeHabit,
     fmt: fmt, parse: parse, midnight: midnight, addDays: addDays, weekStart: weekStart,
-    monthStart: monthStart, monthEnd: monthEnd, maxDate: maxDate, minDate: minDate,
+    monthStart: monthStart, monthEnd: monthEnd, yearStart: yearStart, yearEnd: yearEnd, maxDate: maxDate, minDate: minDate,
     isScheduled: isScheduled, status: status, dayStats: dayStats, rangeStats: rangeStats,
     habitStreak: habitStreak, perfectDayStreak: perfectDayStreak, totalDone: totalDone,
-    level: level, habitRates: habitRates, monthOverview: monthOverview,
-    buckets: buckets, series: series
+    level: level, habitRates: habitRates, periodOverview: periodOverview, monthOverview: monthOverview,
+    buckets: buckets, series: series, groupSeries: groupSeries
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
