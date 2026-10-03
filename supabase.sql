@@ -129,3 +129,43 @@ drop policy if exists completions_delete_own on public.completions;
 --   select id, title, kind, weekdays from public.habits order by sort_order;
 --   select habit_id, count(*) from public.completions group by 1 order by 2 desc;
 -- ---------------------------------------------------------------------
+
+-- =====================================================================
+-- 5) Daily 21:00 push reminder (already applied to the live project).
+--    Pieces: push_subscriptions (devices), push_config (server-only keys),
+--    save_push_subscription() (the only thing the site can call),
+--    edge function supabase/functions/daily-reminder, pg_cron job.
+--    The VAPID private key + cron secret are stored in push_config, not here.
+-- =====================================================================
+create extension if not exists pg_cron;
+create extension if not exists pg_net;
+
+create table if not exists public.push_subscriptions (
+  endpoint   text primary key,
+  p256dh     text not null,
+  auth       text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table public.push_subscriptions enable row level security;
+
+create table if not exists public.push_config (key text primary key, value text not null);
+alter table public.push_config enable row level security;   -- no policies: anon can't read it
+
+create or replace function public.save_push_subscription(p_endpoint text, p_p256dh text, p_auth text)
+returns void language sql security definer set search_path = public as $$
+  insert into public.push_subscriptions (endpoint, p256dh, auth)
+  values (p_endpoint, p_p256dh, p_auth)
+  on conflict (endpoint) do update set p256dh = excluded.p256dh, auth = excluded.auth, updated_at = now();
+$$;
+grant execute on function public.save_push_subscription(text, text, text) to anon;
+
+-- push_config rows needed: vapid_public, vapid_private, vapid_subject, cron_secret.
+-- Cron (18:00 + 19:00 UTC; the function only sends when it is 21:00 in Israel):
+-- select cron.schedule('daily-habit-reminder', '0 18,19 * * *', $cron$
+--   select net.http_post(
+--     url := 'https://<project>.supabase.co/functions/v1/daily-reminder',
+--     headers := jsonb_build_object('Content-Type','application/json',
+--       'x-cron-secret', (select value from public.push_config where key = 'cron_secret')),
+--     body := '{}'::jsonb, timeout_milliseconds := 20000);
+-- $cron$);

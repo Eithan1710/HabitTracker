@@ -213,6 +213,7 @@
     });
     ensureFirst();
     flush();
+    syncPush();
   }
 
   /* ------------------------------------------------------------------ connection (no login) */
@@ -230,6 +231,77 @@
     } finally {
       initing = false;
     }
+  }
+
+
+  /* ------------------------------------------------------------------ daily 21:00 reminder (Web Push) */
+  // One-time opt-in card on the Today screen. Once allowed, the card disappears and the
+  // subscription is silently re-saved on every launch (browsers can rotate it).
+  var VAPID = CFG.VAPID_PUBLIC_KEY || '';
+  var REMIND_HIDE = 'hb:v1:remind-hide';
+  var IS_IOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  var STANDALONE = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  function pushSupported() { return !!VAPID && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window; }
+  function b64ToBytes(b64) {
+    var pad = '='.repeat((4 - b64.length % 4) % 4);
+    var raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+    var out = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+  var BELL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>';
+
+  function remindState() {
+    if (!VAPID || load(REMIND_HIDE, false)) return null;
+    if (pushSupported()) return Notification.permission === 'default' ? 'ask' : null;
+    if (IS_IOS && !STANDALONE) return 'ios';   // iPhone: push only works from the home-screen app
+    return null;
+  }
+  function paintRemind(msg) {
+    var box = $('remind');
+    if (!box) return;
+    if (msg) { box.innerHTML = '<div class="remind done">' + BELL + '<span class="rmd-t"><b>' + esc(msg) + '</b></span></div>'; return; }
+    var st = S.viewDate.getTime() === S.today.getTime() ? remindState() : null;
+    if (!st) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="remind">' + BELL +
+      '<span class="rmd-t"><b>תזכורת ערב ב-21:00</b><span>' +
+        (st === 'ios' ? 'כדי לקבל התראות, הוסף את האתר למסך הבית (שיתוף ← הוספה למסך הבית) ופתח משם.' : 'רק אם נשארו הרגלים לסמן.') +
+      '</span></span>' +
+      (st === 'ask' ? '<button type="button" class="pill" data-act="remind-on">הפעלה</button>' : '') +
+      '<button type="button" class="ic sm x" data-act="remind-x" aria-label="לא עכשיו"><svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg></button>' +
+      '</div>';
+  }
+
+  async function savePushSub(sub) {
+    if (!canSync() || !sub) return false;
+    var j = sub.toJSON();
+    if (!j.keys || !j.keys.p256dh || !j.keys.auth) return false;
+    try {
+      var r = await S.sb.rpc('save_push_subscription', { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth });
+      return !r.error;
+    } catch (e) { return false; }
+  }
+  async function getPushSub(create) {
+    var reg = await navigator.serviceWorker.ready;
+    var sub = await reg.pushManager.getSubscription();
+    if (!sub && create) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(VAPID) });
+    return sub;
+  }
+  // Called after Supabase connects: keep an already-granted subscription saved on the server.
+  async function syncPush() {
+    if (!pushSupported() || Notification.permission !== 'granted') return;
+    try { await savePushSub(await getPushSub(true)); } catch (e) {}
+  }
+  async function enableRemind() {
+    try {
+      var perm = await Notification.requestPermission();
+      if (perm !== 'granted') { paintRemind(); return; }
+      var sub = await getPushSub(true);
+      if (!S.sb) await initSupabase();
+      await savePushSub(sub);
+      paintRemind('התזכורת הופעלה · כל ערב ב-21:00');
+      setTimeout(function () { paintRemind(); }, 2600);
+    } catch (e) { paintRemind(); }
   }
 
   /* ------------------------------------------------------------------ navigation */
@@ -315,6 +387,7 @@
             '<div class="prog-ring" id="progRing" style="--p:0"><div class="pr-in"><b id="pNum">0/0</b></div></div>' +
             '<div class="sm-txt"><b id="pText"></b><span id="pSub"></span></div>' +
           '</section>' +
+          '<div id="remind"></div>' +
         '</aside>' +
         '<div class="t-main">' +
           '<section class="group" aria-labelledby="gMain">' +
@@ -331,6 +404,7 @@
         '</div>' +
       '</div>';
     paintToday(false);
+    paintRemind();
   }
 
   // Updates checks + counters in place (no re-render), so a tap never moves anything on screen.
@@ -404,6 +478,8 @@
     var b = e.target.closest('[data-act]');
     if (!b || b.disabled) return;
     var a = b.getAttribute('data-act');
+    if (a === 'remind-on') { b.disabled = true; enableRemind(); return; }
+    if (a === 'remind-x') { save(REMIND_HIDE, true); paintRemind(); return; }
     if (a === 'prev') setViewDate(L.addDays(S.viewDate, -1));
     else if (a === 'next' && S.viewDate.getTime() < S.today.getTime()) setViewDate(L.addDays(S.viewDate, 1));
     else if (a === 'today') setViewDate(S.today);

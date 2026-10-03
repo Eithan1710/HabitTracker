@@ -3,9 +3,10 @@
  * - Same-origin files and the Supabase SDK/fonts: serve from cache, refresh in the background.
  * - config.js: network first (so edits show up), cache as fallback.
  * - Supabase API calls are never intercepted: offline writes are handled by the app's own queue.
+ * - Push: shows the daily 21:00 reminder; tapping it opens (or focuses) the app.
  * Bump VERSION when you deploy a new build to force a fresh cache.
  */
-const VERSION = 'hb-v3';
+const VERSION = 'hb-v4';
 const SHELL = [
   './', 'index.html', 'style.css', 'habits.js', 'app.js', 'config.js', 'manifest.json',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'
@@ -66,4 +67,32 @@ self.addEventListener('fetch', (event) => {
   } else if (CROSS_ORIGIN_OK.indexOf(url.hostname) >= 0) {
     event.respondWith(staleWhileRevalidate(event));
   }
+});
+
+self.addEventListener('push', (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (e) { data = { body: event.data ? event.data.text() : '' }; }
+  const title = data.title || 'הרגלים';
+  event.waitUntil(self.registration.showNotification(title, {
+    body: data.body || 'זמן לסמן את ההרגלים של היום',
+    icon: 'icons/icon-192.png',
+    badge: 'icons/icon-192.png',
+    tag: 'daily-reminder',
+    renotify: true,
+    lang: 'he',
+    dir: 'rtl',
+    data: { url: data.url || './' }
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = new URL((event.notification.data && event.notification.data.url) || './', self.registration.scope).href;
+  event.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const w of wins) {
+      if (w.url.startsWith(self.registration.scope)) { await w.focus(); return; }
+    }
+    await self.clients.openWindow(target);
+  })());
 });
