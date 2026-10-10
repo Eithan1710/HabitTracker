@@ -8,7 +8,7 @@
   var L = window.HabitLogic;
   var CFG = window.HABITS_CONFIG || {};
   var SDK_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js';
-  var KEY = { habits: 'hb:v1:habits', done: 'hb:v1:done', pending: 'hb:v1:pending', first: 'hb:v1:first', period: 'hb:v1:period' };
+  var KEY = { habits: 'hb:v2:habits', done: 'hb:v1:done', pending: 'hb:v1:pending', first: 'hb:v1:first', period: 'hb:v1:period' };
   var LETTER = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
   var CONFIGURED = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY);
 
@@ -126,7 +126,7 @@
       persistPending();
       backoff = 4000;
       flushing = false;
-      if (Object.keys(S.pending).length) { flush(); return; }
+      if (Object.keys(S.pending).length) return flush();
     } catch (e) {
       flushing = false;
       clearTimeout(retryTimer);
@@ -198,7 +198,8 @@
   async function refreshHabits() {
     if (!canSync()) return;
     try {
-      var r = await S.sb.from('habits').select('id,title,kind,hint,weekdays,time_labels,sort_order').order('sort_order');
+      var r = await S.sb.from('habits').select('id,title,kind,hint,weekdays,time_labels,sort_order,period,target,anchor').order('sort_order');
+      // Older databases without the schedule columns error here: keep the bundled definitions.
       if (r.error || !r.data || !r.data.length) return;
       S.habits = r.data.map(L.normalizeHabit).sort(bySort);
       save(KEY.habits, r.data);
@@ -206,13 +207,17 @@
     } catch (e) {}
   }
 
+  // Today needs the viewed week (week strip) and the viewed month (monthly goals, 2-week window).
+  function todayFrom(d) {
+    return L.fmt(L.minDate(L.minDate(L.weekStart(d), L.monthStart(d)), L.addDays(L.weekStart(d), -7)));
+  }
+
   function bootSync() {
     refreshHabits();
-    ensureData(L.fmt(L.weekStart(S.viewDate))).then(function () {
+    flush().then(function () { return ensureData(todayFrom(S.viewDate)); }).then(function () {
       if (S.tab === 'today') renderToday();
     });
     ensureFirst();
-    flush();
     syncPush();
   }
 
@@ -324,6 +329,33 @@
   var CHECK = '<span class="chk" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 12.5l4 4 8-9"/></svg></span>';
   var CHEV = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
 
+  var DAY_NAME = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+  var PERIOD_WORD = { week: 'השבוע', '2weeks': 'בשבועיים האלה', month: 'החודש' };
+  var GROUP_TITLE = { week: 'השבוע', '2weeks': 'כל שבועיים', month: 'החודש' };
+
+  function shortDate(d) { return d.getDate() + '.' + (d.getMonth() + 1); }
+  // "היום" / "מחר" / "אתמול" / "שלישי 13.10" — relative to the real today.
+  function whenText(d) {
+    var n = L.dayNum(d) - L.dayNum(S.today);
+    if (n === 0) return 'היום';
+    if (n === 1) return 'מחר';
+    if (n === -1) return 'אתמול';
+    return DAY_NAME[d.getDay()] + ' ' + shortDate(d);
+  }
+  function daysText(h) {
+    if (h.weekdays.length === 7) return 'באיזה יום שנוח';
+    var names = h.weekdays.slice().sort().map(function (i) { return DAY_NAME[i]; });
+    return names.length === 1 ? 'ב' + names[0] : names.slice(0, -1).join(', ') + ' או ' + names[names.length - 1];
+  }
+  function freqText(h) {
+    var t = h.target || 1;
+    if (h.period === 'week') return t === 1 ? 'פעם בשבוע' : t + ' פעמים בשבוע';
+    if (h.period === '2weeks') return t === 1 ? 'כל שבועיים' : t + ' פעמים בשבועיים';
+    if (h.period === 'month') return t === 1 ? 'פעם בחודש' : t + ' פעמים בחודש';
+    return h.weekdays.length === 7 ? 'כל יום' : h.weekdays.slice().sort().map(function (i) { return LETTER[i]; }).join(' ');
+  }
+  function periodicHabits() { return S.habits.filter(L.isPeriodic).sort(bySort); }
+
   // Main habit: a full-width row. Time + hint sit under the title, quiet.
   function rowHTML(h, d) {
     var tl = h.time_labels && h.time_labels[d.getDay()];
@@ -338,6 +370,56 @@
   function tileHTML(h) {
     return '<button type="button" class="tile" data-id="' + esc(h.id) + '" aria-pressed="false" style="--c:var(--' + L.colorOf(h) + ')">' +
       CHECK + '<span class="tt"><b>' + esc(h.title) + '</b>' + (h.hint ? '<span>' + esc(h.hint) + '</span>' : '') + '</span></button>';
+  }
+
+  // Periodic habit (every 2 weeks / monthly / weekly): one card that shows the whole period.
+  function goalHTML(h, d) {
+    var tl = h.time_labels && h.time_labels[d.getDay()];
+    return '<button type="button" class="goal" data-goal="' + esc(h.id) + '" aria-pressed="false" style="--c:var(--' + L.colorOf(h) + ')">' +
+      CHECK +
+      '<span class="gt"><b>' + esc(h.title) + '</b>' +
+        '<span class="gm">' + esc(freqText(h)) + ' · ' + esc(daysText(h)) + (tl ? ' · ' + esc(tl) : '') + '</span>' +
+        '<span class="gp"><span class="segs" aria-hidden="true"></span><span class="gp-t"></span></span>' +
+        '<span class="gl"></span>' +
+      '</span>' +
+      '<span class="gs"></span>' +
+    '</button>';
+  }
+
+  // State line for a goal card, as of the real today, for the period that contains the viewed day.
+  function goalView(h) {
+    var ws = L.windowState(h, S.viewDate, S.byDate, S.today);
+    var lastDone = ws.dates.length ? ws.dates[ws.dates.length - 1] : null;
+    var v = { ws: ws, cls: ws.state, badge: '', line: '' };
+    var past = ws.window.end.getTime() < S.today.getTime();   // browsing an earlier period
+    if (ws.state === 'done') {
+      v.badge = 'בוצע';
+      var rel = L.dayNum(lastDone) - L.dayNum(S.today) >= -1;
+      v.line = (rel ? 'בוצע ' : 'בוצע ב') + whenText(lastDone) + (past ? '' : ' · הבא: ' + whenText(ws.next));
+    } else if (ws.state === 'due') {
+      v.badge = ws.lastChance ? 'הזדמנות אחרונה' : 'אפשר היום';
+      if (ws.lastChance) v.cls = 'due last';
+      v.line = ws.lastChance ? 'היום היום האחרון בתקופה הזו' : 'עד ' + whenText(ws.last);
+    } else if (ws.state === 'upcoming') {
+      v.badge = 'בקרוב';
+      v.line = 'הבא: ' + whenText(ws.next);
+    } else {
+      v.badge = 'לא בוצע';
+      if (past) v.line = 'התקופה הזו עברה';
+      else {
+        var nw = L.nextWindow(h, ws.window);
+        v.line = 'הבא: ' + whenText(L.firstAllowed(h, nw.start, nw.end) || nw.start);
+      }
+    }
+    return v;
+  }
+
+  function overviewHTML_today() {
+    return '<div class="ov-mini" id="ovMini">' +
+      '<div class="om"><span>השבוע</span><b id="omWeek">—</b></div>' +
+      '<div class="om" id="omMonthBox"><span>יעדי החודש</span><b id="omMonth">—</b></div>' +
+      '<button type="button" class="om next" id="omNextBox" data-act="goto-next"><span>הבא בתור</span><b id="omNext">—</b></button>' +
+    '</div>';
   }
 
   function weekStripHTML(d) {
@@ -365,6 +447,8 @@
     var list = habitsFor(d);
     var main = list.filter(function (h) { return h.kind === 'main'; });
     var side = list.filter(function (h) { return h.kind === 'side'; });
+    var goals = periodicHabits();
+    var periods = ['week', '2weeks', 'month'].filter(function (p) { return goals.some(function (h) { return h.period === p; }); });
     var rel = isToday ? 'היום' : ds === L.fmt(L.addDays(S.today, -1)) ? 'אתמול' : '';
     var dt = dateText(d, { day: 'numeric', month: 'long' }) + (d.getFullYear() !== S.today.getFullYear() ? ' ' + d.getFullYear() : '');
 
@@ -387,6 +471,7 @@
             '<div class="prog-ring" id="progRing" style="--p:0"><div class="pr-in"><b id="pNum">0/0</b></div></div>' +
             '<div class="sm-txt"><b id="pText"></b><span id="pSub"></span></div>' +
           '</section>' +
+          (goals.length ? overviewHTML_today() : '') +
           '<div id="remind"></div>' +
         '</aside>' +
         '<div class="t-main">' +
@@ -401,6 +486,13 @@
               '<div class="g-head"><h2 id="gSide">משימות צד</h2><span class="g-count" id="cSide"></span></div>' +
               '<div class="tiles">' + side.map(tileHTML).join('') + '</div>' +
             '</section>' : '') +
+          periods.map(function (p) {
+            var hs = goals.filter(function (h) { return h.period === p; });
+            return '<section class="group goals" aria-labelledby="gP-' + p + '">' +
+              '<div class="g-head"><h2 id="gP-' + p + '">' + GROUP_TITLE[p] + '</h2><span class="g-count" id="cP-' + p + '"></span></div>' +
+              '<div class="goal-list">' + hs.map(function (h) { return goalHTML(h, d); }).join('') + '</div>' +
+            '</section>';
+          }).join('') +
         '</div>' +
       '</div>';
     paintToday(false);
@@ -443,6 +535,7 @@
     if ($('pSub')) $('pSub').textContent = sub;
     if ($('cMain')) { $('cMain').textContent = mainD + '/' + mainT; $('cMain').classList.toggle('ok', mainComplete); }
     if ($('cSide')) { $('cSide').textContent = sideD + '/' + sideT; $('cSide').classList.toggle('ok', sideT > 0 && sideD === sideT); }
+    paintGoals();
     // keep today's ring in the week strip in sync too
     var wk = document.querySelector('#view-today .wk[data-day="' + ds + '"] .ring');
     if (wk) {
@@ -450,6 +543,110 @@
       wk.parentNode.classList.toggle('full', complete);
     }
   }
+
+  function paintGoals() {
+    var goals = periodicHabits(), per = {}, nextBest = null;
+    goals.forEach(function (h) {
+      var btn = document.querySelector('#view-today .goal[data-goal="' + h.id + '"]');
+      var v = goalView(h), ws = v.ws;
+      (per[h.period] = per[h.period] || { met: 0, n: 0 }).n++;
+      if (ws.state === 'done') per[h.period].met++;
+      // "next up" is always about the real today (even while browsing an earlier day):
+      // the soonest thing still to do; when everything is met, the soonest next period.
+      var now = L.sameDay(S.viewDate, S.today) ? ws : L.windowState(h, S.today, S.byDate, S.today);
+      var when = now.state === 'due' ? S.today : now.next;
+      if (now.state === 'missed') { var nw = L.nextWindow(h, now.window); when = L.firstAllowed(h, nw.start, nw.end); }
+      if (when) {
+        var rank = (now.state === 'done' ? 1e6 : 0) + L.dayNum(when);
+        if (!nextBest || rank < nextBest.rank) nextBest = { rank: rank, h: h, when: when, done: now.state === 'done' };
+      }
+      if (!btn) return;
+      btn.className = 'goal is-' + v.cls.split(' ').join(' is-') + (ws.state === 'done' ? ' on' : '');
+      btn.setAttribute('aria-pressed', ws.state === 'done' ? 'true' : 'false');
+      btn.setAttribute('aria-label', h.title + ', ' + freqText(h) + ', ' + ws.count + ' מתוך ' + ws.target + ' ' + PERIOD_WORD[h.period] + ', ' + v.badge);
+      var segs = '';
+      for (var i = 0; i < ws.target; i++) segs += '<i' + (i < ws.count ? ' class="f"' : '') + '></i>';
+      btn.querySelector('.segs').innerHTML = segs;
+      btn.querySelector('.gp-t').textContent = Math.min(ws.count, ws.target) + '/' + ws.target + ' ' + PERIOD_WORD[h.period];
+      btn.querySelector('.gl').textContent = v.line;
+      btn.querySelector('.gs').textContent = v.badge;
+    });
+    Object.keys(per).forEach(function (p) {
+      var c = $('cP-' + p);
+      if (c) { c.textContent = per[p].met + '/' + per[p].n; c.classList.toggle('ok', per[p].met === per[p].n); }
+    });
+
+    // overview strip
+    if (!$('ovMini')) return;
+    var wk = L.weekProgress(S.habits, S.viewDate, S.byDate);
+    $('omWeek').textContent = wk.total ? wk.done + '/' + wk.total : '—';
+    var monthly = goals.filter(function (h) { return h.period === 'month'; });
+    $('omMonthBox').hidden = !monthly.length;
+    if (monthly.length) {
+      var met = monthly.filter(function (h) { return L.windowState(h, S.viewDate, S.byDate, S.today).state === 'done'; }).length;
+      $('omMonth').textContent = met + '/' + monthly.length;
+      $('omMonthBox').classList.toggle('ok', met === monthly.length);
+    }
+    var nb = $('omNextBox');
+    if (nextBest) {
+      nb.hidden = false;
+      nb.dataset.goal = nextBest.h.id;
+      $('omNext').textContent = nextBest.h.title + ' · ' + whenText(nextBest.when);
+      nb.classList.toggle('now', !nextBest.done && L.sameDay(nextBest.when, S.today));
+    } else nb.hidden = true;
+  }
+
+  // One tap on a goal card: mark the viewed day; tap again (same day) to undo.
+  // If the period's target was reached on another day, offer to undo that one instead.
+  function toggleGoal(btn) {
+    var id = btn.getAttribute('data-goal'), h = habitById(id), ds = L.fmt(S.viewDate);
+    var ws = L.windowState(h, S.viewDate, S.byDate, S.today);
+    if (S.byDate[ds] && S.byDate[ds][id]) {
+      setDone(ds, id, false);
+      paintToday(true);
+      toast('הסימון בוטל · ' + h.title, 'החזרה', function () { setDone(ds, id, true); paintToday(true); });
+      return;
+    }
+    if (ws.count >= ws.target) {
+      var last = ws.dates[ws.dates.length - 1], lds = L.fmt(last);
+      toast(h.title + ' כבר בוצע ' + whenText(last), 'ביטול הסימון', function () {
+        setDone(lds, id, false); paintToday(true);
+      });
+      return;
+    }
+    setDone(ds, id, true);
+    paintToday(true);
+    btn.classList.remove('pop'); void btn.offsetWidth; btn.classList.add('pop');
+    if (navigator.vibrate) navigator.vibrate(8);
+    toast('סומן: ' + h.title, 'ביטול', function () { setDone(ds, id, false); paintToday(true); });
+  }
+
+  /* ---- undo toast (only for goal cards, whose state covers a whole period) ---- */
+  var toastTimer = null, toastUndo = null;
+  function toast(text, action, undo) {
+    var t = $('toast');
+    if (!t) return;
+    toastUndo = undo || null;
+    t.innerHTML = '<span>' + esc(text) + '</span>' + (undo ? '<button type="button" data-undo>' + esc(action) + '</button>' : '');
+    t.hidden = false;
+    void t.offsetWidth;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(hideToast, 4500);
+  }
+  function hideToast() {
+    var t = $('toast');
+    if (!t) return;
+    t.classList.remove('show');
+    toastUndo = null;
+    setTimeout(function () { if (!t.classList.contains('show')) t.hidden = true; }, 220);
+  }
+  $('toast').addEventListener('click', function (e) {
+    if (!e.target.closest('[data-undo]')) return;
+    var fn = toastUndo;
+    hideToast();
+    if (fn) fn();
+  });
 
   function toggleRow(btn) {
     var id = btn.getAttribute('data-id'), ds = L.fmt(S.viewDate);
@@ -465,7 +662,7 @@
   function setViewDate(d) {
     S.viewDate = d;
     renderToday();
-    ensureData(L.fmt(L.weekStart(d))).then(function () {
+    ensureData(todayFrom(d)).then(function () {
       if (S.tab === 'today' && L.fmt(S.viewDate) === L.fmt(d)) { renderToday(); }
     });
   }
@@ -473,6 +670,8 @@
   $('view-today').addEventListener('click', function (e) {
     var row = e.target.closest('.row, .tile');
     if (row) { toggleRow(row); return; }
+    var goal = e.target.closest('.goal');
+    if (goal) { toggleGoal(goal); return; }
     var wk = e.target.closest('.wk-strip .wk');
     if (wk && !wk.classList.contains('future')) { setViewDate(L.parse(wk.getAttribute('data-day'))); return; }
     var b = e.target.closest('[data-act]');
@@ -480,13 +679,21 @@
     var a = b.getAttribute('data-act');
     if (a === 'remind-on') { b.disabled = true; enableRemind(); return; }
     if (a === 'remind-x') { save(REMIND_HIDE, true); paintRemind(); return; }
+    if (a === 'goto-next') {
+      var card = document.querySelector('#view-today .goal[data-goal="' + b.dataset.goal + '"]');
+      if (card) {
+        card.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'center' });
+        card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+      }
+      return;
+    }
     if (a === 'prev') setViewDate(L.addDays(S.viewDate, -1));
     else if (a === 'next' && S.viewDate.getTime() < S.today.getTime()) setViewDate(L.addDays(S.viewDate, 1));
     else if (a === 'today') setViewDate(S.today);
   });
   $('view-today').addEventListener('animationend', function (e) {
-    var row = e.target.closest && e.target.closest('.row, .tile');
-    if (row) row.classList.remove('pop');
+    var row = e.target.closest && e.target.closest('.row, .tile, .goal');
+    if (row) row.classList.remove('pop', 'flash');
   });
 
   /* ------------------------------------------------------------------ HISTORY */
@@ -728,7 +935,9 @@
       return '<button type="button" class="hchip' + (x.id === h.id ? ' on' : '') + '" data-habit="' + esc(x.id) + '" style="--c:var(--' + L.colorOf(x) + ')">' + esc(x.title) + '</button>';
     }).join('');
 
-    var html = '<div class="chips">' + chips + '</div>' + '<div class="scope">' + seg(RANGES, S.hRange, 'data-range') + '</div>';
+    var html = '<div class="chips">' + chips + '</div>' +
+      '<p class="h-freq">' + esc(freqText(h)) + (L.isPeriodic(h) || h.weekdays.length < 7 ? ' · ' + esc(daysText(h)) : '') + '</p>' +
+      '<div class="scope">' + seg(RANGES, S.hRange, 'data-range') + '</div>';
     if (!r.den) {
       return html + '<p class="empty big">אין עדיין נתונים בטווח הזה.</p>';
     }
@@ -739,6 +948,8 @@
 
     var spanDays = Math.round((today.getTime() - eff.getTime()) / 86400000) + 1;
     var unit = (S.hRange === '7' || S.hRange === '30') ? 'day' : (spanDays / 7 <= 26 ? 'week' : 'month');
+    if (h.period === 'month') unit = 'month';
+    else if (L.isPeriodic(h) && unit === 'day') unit = 'week';
     var ser = L.series(h, from, today, unit, S.byDate, today, start).filter(function (b) {
       return !start || b.end.getTime() >= start.getTime();
     });
@@ -748,7 +959,7 @@
       return '<div class="b' + (b.pct === null ? ' na' : b.pct === 0 ? ' z' : '') + '" style="--h:' + height.toFixed(0) + '%" role="img" aria-label="' + esc(lbl) + ', ' + pctText(b.pct) + '"><i></i></div>';
     }).join('');
     var labels = '';
-    if (S.hRange === '7') {
+    if (S.hRange === '7' && unit === 'day') {
       labels = '<div class="bl seven">' + ser.map(function (b) { return '<span>' + LETTER[b.start.getDay()] + '</span>'; }).join('') + '</div>';
     } else if (ser.length) {
       var f = ser[0].start, l = ser[ser.length - 1].end;
@@ -792,14 +1003,15 @@
   var sheetOpen = false;
   function openDay(ds) {
     var d = L.parse(ds);
-    var list = habitsFor(d);
+    var list = S.habits.filter(function (h) { return L.status(h, d, S.byDate, S.today) !== 'na'; }).sort(bySort);
     var st = L.dayStats(list, d, S.byDate, S.today);
     var future = d.getTime() > S.today.getTime();
     var isToday = ds === L.fmt(S.today);
     var rows = list.map(function (h) {
       var s = L.status(h, d, S.byDate, S.today);
       var label = s === 'done' ? 'בוצע' : s === 'miss' ? 'לא בוצע' : s === 'pending' ? 'עוד לא סומן' : '';
-      return '<li class="sr ' + s + '" style="--c:var(--' + L.colorOf(h) + ')"><span class="dot">' + (s === 'done' ? '✓' : '') + '</span><span class="sn">' + esc(h.title) + '</span><span class="ss">' + label + '</span></li>';
+      return '<li class="sr ' + s + '" style="--c:var(--' + L.colorOf(h) + ')"><span class="dot">' + (s === 'done' ? '✓' : '') + '</span>' +
+        '<span class="sn">' + esc(h.title) + (L.isPeriodic(h) ? '<small>' + esc(freqText(h)) + '</small>' : '') + '</span><span class="ss">' + label + '</span></li>';
     }).join('');
     $('sheetBody').innerHTML =
       '<h2 id="sheetTitle">' + esc(dateText(d, { weekday: 'long', day: 'numeric', month: 'long' })) + '</h2>' +
@@ -845,7 +1057,7 @@
     refreshDay();
     S.loadedFrom = null;
     if (S.tab === 'today') {
-      ensureData(L.fmt(L.weekStart(S.viewDate))).then(function () { if (S.tab === 'today') renderToday(); });
+      ensureData(todayFrom(S.viewDate)).then(function () { if (S.tab === 'today') renderToday(); });
     }
     flush();
   });

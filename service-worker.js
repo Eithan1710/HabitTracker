@@ -6,7 +6,7 @@
  * - Push: shows the daily 21:00 reminder; tapping it opens (or focuses) the app.
  * Bump VERSION when you deploy a new build to force a fresh cache.
  */
-const VERSION = 'hb-v4';
+const VERSION = 'hb-v5';
 const SHELL = [
   './', 'index.html', 'style.css', 'habits.js', 'app.js', 'config.js', 'manifest.json',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'

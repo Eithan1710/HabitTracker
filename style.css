@@ -16,6 +16,7 @@
   --run: #6D28D9;
   --friends: #B45309;
   --reminders: #0F766E;
+  --climb: #0E7490;
   --ok: #15803D;
   --miss: #B42318;
   --warn: #B45309;
@@ -43,6 +44,7 @@
     --run: #8B5CF6;
     --friends: #D97706;
     --reminders: #14B8A6;
+    --climb: #22B8D6;
     --ok: #22A05A;
     --miss: #F97066;
     --warn: #F5A524;
@@ -227,6 +229,23 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
   .sm-txt b { font-size: 1.15rem; }
 }
 
+/* Overview strip: the week, this month's goals, and what's next — one glance, under the status */
+.ov-mini { display: grid; grid-template-columns: 1fr 1fr 1.6fr; gap: 8px; }
+.om {
+  appearance: none; border: 0; text-align: start; min-width: 0;
+  display: flex; flex-direction: column; gap: 1px;
+  background: var(--surface); border-radius: 16px; padding: 9px 12px 10px;
+}
+.om span { font-size: .7rem; font-weight: 500; color: var(--muted); }
+.om b { font-size: 1rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.om.ok b { color: var(--ok); }
+.om.next { cursor: pointer; transition: transform .12s, background .2s; }
+.om.next:active { transform: scale(.97); }
+.om.next b { font-size: .9rem; line-height: 1.5; }
+.om.next.now { background: color-mix(in srgb, var(--salsa) 9%, var(--surface)); }
+.om.next.now b { color: var(--ink); }
+.om.next.now span::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-inline-end: 5px; border-radius: 50%; background: var(--salsa); vertical-align: middle; }
+
 /* Daily reminder opt-in: quiet card under the status, shown once */
 .remind {
   display: flex; align-items: center; gap: 12px;
@@ -302,6 +321,64 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
 .tile .chk { width: 26px; height: 26px; }
 .tile .chk svg { width: 16px; height: 16px; }
 .tile.on { background: color-mix(in srgb, var(--c) 10%, var(--surface)); box-shadow: none; }
+/* an odd last tile gets the whole row instead of half of it */
+.tiles .tile:last-child:nth-child(odd) { grid-column: 1 / -1; }
+
+/* Goal cards: habits judged per period (every 2 weeks, monthly). One card each, never repeated. */
+.goal-list { display: grid; gap: 10px; }
+.goal {
+  appearance: none; border: 0; cursor: pointer; width: 100%; text-align: start; user-select: none; -webkit-user-select: none;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px;
+  min-height: 84px; padding: 14px 16px 14px 18px; border-radius: 20px;
+  background: var(--surface); box-shadow: 0 1px 2px rgba(15, 20, 32, .04);
+  transition: background .25s, transform .12s, box-shadow .2s;
+}
+.goal:active { transform: scale(.985); }
+.gt { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.gt b { font-size: 1.1rem; font-weight: 700; line-height: 1.25; }
+.gm { font-size: .82rem; color: var(--muted); }
+.gp { display: flex; align-items: center; gap: 8px; margin-top: 5px; font-size: .82rem; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.gp-t { min-width: 0; }
+.gl { font-size: .8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.goal.is-last .gl { color: var(--warn); font-weight: 600; }
+.segs { display: inline-flex; gap: 3px; flex: none; }
+.segs i { width: 18px; height: 6px; border-radius: 999px; background: var(--soft); transition: background .25s; }
+.segs i.f { background: var(--c); }
+.gs {
+  align-self: start; font-size: .72rem; font-weight: 700; white-space: nowrap;
+  padding: 3px 9px; border-radius: 999px; background: var(--soft); color: var(--muted);
+}
+.goal.is-due .gs { background: color-mix(in srgb, var(--c) 14%, var(--surface)); color: var(--c); }
+.goal.is-due:not(.on) .chk { box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 16%, transparent); }
+.goal.is-last .gs { background: color-mix(in srgb, var(--warn) 16%, var(--surface)); color: var(--warn); }
+.goal.is-upcoming .chk { border-color: color-mix(in srgb, var(--c) 45%, var(--line)); }
+.goal.is-missed .gs { background: color-mix(in srgb, var(--miss) 12%, var(--surface)); color: var(--miss); }
+.goal.is-done { background: color-mix(in srgb, var(--c) 10%, var(--surface)); box-shadow: none; }
+.goal.is-done .gs { background: color-mix(in srgb, var(--ok) 14%, var(--surface)); color: var(--ok); }
+.goal.on .chk { background: var(--c); }
+.goal.on .chk svg { stroke-dashoffset: 0; transition: stroke-dashoffset .25s .06s var(--ease); }
+.goal.pop .chk { animation: pop .34s var(--ease); }
+.goal.flash { animation: flash .9s var(--ease); }
+@keyframes flash { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 30% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 45%, transparent); } }
+@media (hover: hover) { .goal:hover { box-shadow: 0 6px 18px -10px rgba(15, 20, 32, .25); } .goal.on:hover { box-shadow: none; } }
+
+/* Undo toast (goal cards only) */
+.toast {
+  position: fixed; z-index: 30; inset-inline: 0; margin: 0 auto; width: max-content; max-width: calc(100% - 32px);
+  bottom: calc(76px + env(safe-area-inset-bottom));
+  display: flex; align-items: center; gap: 14px;
+  background: var(--ink); color: var(--bg); border-radius: 999px; padding: 10px 10px 10px 18px;
+  font-size: .9rem; font-weight: 500; box-shadow: 0 10px 30px -10px rgba(15, 20, 32, .45);
+  opacity: 0; transform: translateY(8px); transition: opacity .2s, transform .2s var(--ease);
+}
+.toast.show { opacity: 1; transform: none; }
+.toast span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toast button {
+  appearance: none; border: 0; cursor: pointer; flex: none;
+  background: color-mix(in srgb, var(--bg) 16%, transparent); color: var(--bg);
+  font-weight: 700; font-size: .85rem; padding: 6px 12px; border-radius: 999px;
+}
+@media (min-width: 900px) { .toast { bottom: 92px; } }
 
 @media (min-width: 900px) {
   .row.main { min-height: 88px; padding: 18px 22px; }
@@ -402,6 +479,7 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
 .hp { text-align: end; font-weight: 700; font-variant-numeric: tabular-nums; font-size: .92rem; }
 
 /* per-habit page */
+.h-freq { margin-top: 10px; color: var(--muted); font-size: .88rem; }
 .chips { display: flex; gap: 8px; overflow-x: auto; margin: 14px -18px 0; padding: 2px 18px 8px; scrollbar-width: none; }
 @media (min-width: 900px) { .chips { flex-wrap: wrap; margin-inline: 0; padding-inline: 0; } }
 .chips::-webkit-scrollbar { display: none; }
@@ -443,7 +521,8 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
 .sr .dot { flex: none; width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center; color: #fff; font-size: .8rem; font-weight: 700; }
 .sr.done .dot { background: var(--c); border-color: var(--c); }
 .sr.miss .dot { border-color: var(--miss); }
-.sr .sn { flex: 1; }
+.sr .sn { flex: 1; display: flex; flex-direction: column; }
+.sr .sn small { font-size: .75rem; color: var(--muted); }
 .sr .ss { color: var(--muted); font-size: .85rem; }
 .sr.miss .ss { color: var(--miss); }
 
