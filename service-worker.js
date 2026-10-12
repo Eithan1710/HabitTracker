@@ -3,10 +3,10 @@
  * - Same-origin files and the Supabase SDK/fonts: serve from cache, refresh in the background.
  * - config.js: network first (so edits show up), cache as fallback.
  * - Supabase API calls are never intercepted: offline writes are handled by the app's own queue.
- * - Push: shows the daily 21:00 reminder; tapping it opens (or focuses) the app.
+ * - Push: shows the daily 22:00 reminder; tapping it opens (or focuses) the app.
  * Bump VERSION when you deploy a new build to force a fresh cache.
  */
-const VERSION = 'hb-v5';
+const VERSION = 'hb-v6';
 const SHELL = [
   './', 'index.html', 'style.css', 'habits.js', 'app.js', 'config.js', 'manifest.json',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'

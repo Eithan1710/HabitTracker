@@ -1,5 +1,5 @@
-// daily-reminder: sends the 21:00 (Asia/Jerusalem) "mark today's habits" push.
-// Called by pg_cron at 18:00 and 19:00 UTC; only the call that lands on 21:00 local
+// daily-reminder: sends the 22:00 (Asia/Jerusalem) "mark today's habits" push.
+// Called by pg_cron at 19:00 and 20:00 UTC; only the call that lands on 22:00 local
 // time sends (covers summer and winter time). Skips if everything is already marked.
 // Auth: header x-cron-secret must match push_config.cron_secret. ?force=1 skips the hour check (testing).
 //
@@ -66,7 +66,7 @@ Deno.serve(async (req) => {
 
   const url = new URL(req.url);
   const now = localNow();
-  if (now.hour !== 21 && url.searchParams.get("force") !== "1") return json({ skipped: "not 21:00 local", now });
+  if (now.hour !== 22 && url.searchParams.get("force") !== "1") return json({ skipped: "not 22:00 local", now });
 
   // Schedule columns may not exist on an older database: fall back to plain weekday habits.
   let habits: Habit[] = [];

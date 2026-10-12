@@ -5,7 +5,7 @@
  *                    Row Level Security (supabase.sql) is what protects your data.
  *                    NEVER put the "service_role" key here.
  *
- * VAPID_PUBLIC_KEY   public key for the daily 21:00 push reminder (public by design;
+ * VAPID_PUBLIC_KEY   public key for the daily 22:00 push reminder (public by design;
  *                    the matching private key lives only on the server).
  *
  * While these are empty the app still works: taps are saved on the device only.

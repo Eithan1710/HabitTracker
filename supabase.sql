@@ -170,7 +170,7 @@ drop policy if exists completions_delete_own on public.completions;
 -- ---------------------------------------------------------------------
 
 -- =====================================================================
--- 5) Daily 21:00 push reminder (already applied to the live project).
+-- 5) Daily 22:00 push reminder (already applied to the live project).
 --    Pieces: push_subscriptions (devices), push_config (server-only keys),
 --    save_push_subscription() (the only thing the site can call),
 --    edge function supabase/functions/daily-reminder, pg_cron job.
@@ -200,8 +200,8 @@ $$;
 grant execute on function public.save_push_subscription(text, text, text) to anon;
 
 -- push_config rows needed: vapid_public, vapid_private, vapid_subject, cron_secret.
--- Cron (18:00 + 19:00 UTC; the function only sends when it is 21:00 in Israel):
--- select cron.schedule('daily-habit-reminder', '0 18,19 * * *', $cron$
+-- Cron (19:00 + 20:00 UTC; the function only sends when it is 22:00 in Israel):
+-- select cron.schedule('daily-habit-reminder', '0 19,20 * * *', $cron$
 --   select net.http_post(
 --     url := 'https://<project>.supabase.co/functions/v1/daily-reminder',
 --     headers := jsonb_build_object('Content-Type','application/json',

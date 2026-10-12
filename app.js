@@ -239,7 +239,7 @@
   }
 
 
-  /* ------------------------------------------------------------------ daily 21:00 reminder (Web Push) */
+  /* ------------------------------------------------------------------ daily 22:00 reminder (Web Push) */
   // One-time opt-in card on the Today screen. Once allowed, the card disappears and the
   // subscription is silently re-saved on every launch (browsers can rotate it).
   var VAPID = CFG.VAPID_PUBLIC_KEY || '';
@@ -269,7 +269,7 @@
     var st = S.viewDate.getTime() === S.today.getTime() ? remindState() : null;
     if (!st) { box.innerHTML = ''; return; }
     box.innerHTML = '<div class="remind">' + BELL +
-      '<span class="rmd-t"><b>תזכורת ערב ב-21:00</b><span>' +
+      '<span class="rmd-t"><b>תזכורת ערב ב-22:00</b><span>' +
         (st === 'ios' ? 'כדי לקבל התראות, הוסף את האתר למסך הבית (שיתוף ← הוספה למסך הבית) ופתח משם.' : 'רק אם נשארו הרגלים לסמן.') +
       '</span></span>' +
       (st === 'ask' ? '<button type="button" class="pill" data-act="remind-on">הפעלה</button>' : '') +
@@ -304,7 +304,7 @@
       var sub = await getPushSub(true);
       if (!S.sb) await initSupabase();
       await savePushSub(sub);
-      paintRemind('התזכורת הופעלה · כל ערב ב-21:00');
+      paintRemind('התזכורת הופעלה · כל ערב ב-22:00');
       setTimeout(function () { paintRemind(); }, 2600);
     } catch (e) { paintRemind(); }
   }
